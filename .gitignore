@@ -9,6 +9,7 @@
 *.so.*
 *.dll
 *.dylib
+.DS_Store
 
 # Qt-es
 object_script.*.Release
@@ -27,7 +28,11 @@ qrc_*.cpp
 ui_*.h
 *.qmlc
 *.jsc
-*build-*
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
 builddir/
 .flatpak-builder/
 repo/
@@ -107,8 +112,8 @@ go.work.sum
 .env*
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
 vim/
 
 bin/
@@ -117,9 +122,30 @@ bin/
 .envrc
 .direnv/
 quickshell/dms-plugins
-__pycache__
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
 
 core/dfiles
 
 # Populated from quickshell/ by `make sync-shell` for embedded builds
 core/internal/shellembed/dist/
+
+dist/
+/artifacts/
+/dfiles-linux-*
+/dfiles-completions-*
+*.app/
+*.dSYM/
+
+# Local signing credentials
+*.p12
+*.p8
+*.keychain-db
+
+# Local diagnostics and conversation exports
+*.log
+/.claude/
+/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*-session-*.txt
