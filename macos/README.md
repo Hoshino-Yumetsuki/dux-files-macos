@@ -12,6 +12,12 @@ and `/usr/lib` remain dynamic: macOS does not support statically linking its
 system libraries. Builder tools can come from Homebrew without becoming runtime
 dependencies.
 
+Finder and Dock use `assets/dev.duxlabs.files.icns`, generated from the existing
+`assets/dev.duxlabs.files.svg`. To refresh it after changing the SVG, render an
+iconset with `rsvg-convert` at 16, 32, 128, 256 and 512 points, each at 1x and 2x,
+then convert it with `iconutil -c icns`. The generated ICNS is checked in; normal
+builds copy it into `Contents/Resources` and require no image-conversion tools.
+
 ## Development and checks
 
 The shared Qt development build runs the original interface on Cocoa. With the

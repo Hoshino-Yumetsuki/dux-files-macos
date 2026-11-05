@@ -36,7 +36,9 @@ execute_process(
 set(DFILES_BACKEND "${CMAKE_CURRENT_SOURCE_DIR}/../core/bin/dfiles" CACHE FILEPATH "CGO-free Go backend")
 qt_add_executable(dfiles-ui MACOSX_BUNDLE
     main.cpp runtime/io.cpp runtime/io.h runtime/shell.cpp runtime/shell.h runtime/cocoa.mm native/clipboard.mm
+    ../assets/dev.duxlabs.files.icns
 )
+set_source_files_properties(../assets/dev.duxlabs.files.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 set(DFILES_NATIVE_FRAMEWORKS
     "-framework AppKit" "-framework CoreServices" "-framework UniformTypeIdentifiers"
     "-framework CoreGraphics" "-framework ImageIO" "-framework AVFoundation" "-framework CoreMedia" "-framework QuickLookThumbnailing" "-framework Quartz")
@@ -54,6 +56,7 @@ set_target_properties(dfiles-ui PROPERTIES
     OUTPUT_NAME "Dux Files"
     MACOSX_BUNDLE_GUI_IDENTIFIER dev.duxlabs.files
     MACOSX_BUNDLE_BUNDLE_NAME "Dux Files"
+    MACOSX_BUNDLE_ICON_FILE dev.duxlabs.files.icns
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
 )
 file(GLOB_RECURSE qml_sources CONFIGURE_DEPENDS "${QML_ROOT}/qs/*.qml" "${QML_ROOT}/qs/*.js")
