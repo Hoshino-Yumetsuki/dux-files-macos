@@ -1,0 +1,26 @@
+package trash
+
+import "golang.org/x/sys/unix"
+
+func readMountPoints() []string {
+	n, err := unix.Getfsstat(nil, unix.MNT_NOWAIT)
+	if err != nil || n == 0 {
+		return nil
+	}
+	stats := make([]unix.Statfs_t, n)
+	n, err = unix.Getfsstat(stats, unix.MNT_NOWAIT)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, st := range stats[:min(n, len(stats))] {
+		mp := unix.ByteSliceToString(st.Mntonname[:])
+		if mp == "" || skipMountPoint(mp, seen) || skipFsType(unix.ByteSliceToString(st.Fstypename[:])) {
+			continue
+		}
+		seen[mp] = true
+		out = append(out, mp)
+	}
+	return out
+}

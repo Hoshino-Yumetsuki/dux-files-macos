@@ -56,3 +56,5 @@ require (
 	golang.org/x/text v0.43.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
+
+replace github.com/duxlabs-dev/dux-go => ./third_party/dux-go
