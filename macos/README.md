@@ -385,6 +385,8 @@ association. Lookup and setting use `kLSRolesAll`, matching normal folder openin
 not the potentially different viewer-role handler. Restore preserves the previous
 effective opener, not each separate role preference. LaunchServices has no atomic
 compare-and-swap, so external ownership-change checks are best-effort.
+Folder-handler updates hold a separate state-file lock until the request returns;
+closing its descriptor releases the lock, including on error paths.
 macOS has no supported global replacement for other applications' open/save
 panels, so the Linux desktop-portal chooser remains unavailable. Secure privileged
 file operations also remain unavailable without a separately designed, signed and

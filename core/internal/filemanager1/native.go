@@ -88,7 +88,6 @@ func (s *Service) changeNative(enabled bool) error {
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return fmt.Errorf("folder handler state is busy: %w", err)
 	}
-	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN)
 
 	owner, err := s.nativeOwner()
 	if err != nil {

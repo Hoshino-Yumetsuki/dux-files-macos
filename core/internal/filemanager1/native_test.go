@@ -170,7 +170,6 @@ func TestNativeSerializesStateChangesAcrossInstances(t *testing.T) {
 	require.NoError(t, err)
 	defer lock.Close()
 	require.NoError(t, unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB))
-	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN)
 
 	status := svc.SetEnabled(true)
 	assert.Contains(t, status.Reason, "folder handler state is busy")
