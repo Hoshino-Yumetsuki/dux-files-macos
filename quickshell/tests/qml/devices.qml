@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtTest
 import Quickshell
 import qs.Services
 import qs.Common
@@ -136,7 +137,16 @@ ShellRoot {
         }
     }
 
-    Component.onCompleted: {
+    TestCase {
+        name: "Devices"
+        when: connectDialog.parent !== null
+
+        function test_devices() {
+            fixture.runChecks();
+        }
+    }
+
+    function runChecks() {
         DevicesService.transport = fakeTransport;
         DC.Style.theme = Theme;
         DC.I18n.backend = I18n;

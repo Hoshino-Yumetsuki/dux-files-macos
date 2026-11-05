@@ -34,6 +34,8 @@ NSPasteboard file/image data and cross-process cut ownership on an isolated name
 pasteboard, native PDF/image rendering, macOS key bindings, the original QML
 interaction fixtures, host startup/path handling/quit, staging and dependency/notice
 checks. The Linux clipboard-IPC fixture is replaced by the native clipboard checks.
+The device/network fixture waits for the dialog's window overlay before running
+visibility checks on either host.
 Set
 `QT_SOURCE_DIR` when running CTest to also check the real Qt attribution files.
 The clipboard check forces Qt's offscreen platform so it does not replace the
