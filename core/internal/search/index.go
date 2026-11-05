@@ -38,6 +38,7 @@ const (
 	reasonExcluded   = "EXCLUDED"
 	reasonIgnored    = "IGNORED"
 	reasonDirect     = "DIRECT"
+	reasonPartial    = "PARTIAL"
 )
 
 type indexInfo struct {
@@ -71,6 +72,7 @@ type indexBackend struct {
 	now        func() time.Time
 	infoWait   time.Duration
 	searchWait time.Duration
+	native     func(context.Context, string, any, any) error
 
 	mu      sync.Mutex
 	socket  string
@@ -104,7 +106,7 @@ func (b *indexBackend) forget() {
 func (b *indexBackend) fallback(err error) string {
 	b.forget()
 	if !b.logged.Swap(true) {
-		log.Warnf("danksearch unavailable, searching with the walk instead: %v", err)
+		log.Warnf("danksearch unavailable: %v", err)
 	}
 	return reasonError
 }
@@ -115,6 +117,9 @@ func (b *indexBackend) serve(sc *search, em *emitter, targets []string, query st
 	}
 	if !b.enabled.Load() {
 		return reasonNoIndex
+	}
+	if b.native != nil {
+		return b.serveSpotlight(sc, em, targets, terms, opts)
 	}
 	if strings.TrimSpace(query) == "" {
 		return reasonNoQuery

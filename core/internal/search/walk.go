@@ -27,18 +27,21 @@ type hit struct {
 }
 
 type event struct {
-	SearchID   string `json:"searchId"`
-	Kind       string `json:"kind"`
-	Entries    []hit  `json:"entries,omitempty"`
-	Count      int    `json:"count"`
-	Truncated  bool   `json:"truncated,omitempty"`
-	Partial    bool   `json:"partial,omitempty"`
-	Cancelled  bool   `json:"cancelled,omitempty"`
-	Unreadable int    `json:"unreadable,omitempty"`
-	Backend    string `json:"backend,omitempty"`
-	Phase      string `json:"phase,omitempty"`
-	DepthLimit int    `json:"depthLimit,omitempty"`
-	Reason     string `json:"reason,omitempty"`
+	SearchID         string `json:"searchId"`
+	Kind             string `json:"kind"`
+	Entries          []hit  `json:"entries,omitempty"`
+	Count            int    `json:"count"`
+	Truncated        bool   `json:"truncated,omitempty"`
+	Partial          bool   `json:"partial,omitempty"`
+	Cancelled        bool   `json:"cancelled,omitempty"`
+	Unreadable       int    `json:"unreadable,omitempty"`
+	Backend          string `json:"backend,omitempty"`
+	Phase            string `json:"phase,omitempty"`
+	DepthLimit       int    `json:"depthLimit,omitempty"`
+	ContentAvailable bool   `json:"contentAvailable,omitempty"`
+	Reason           string `json:"reason,omitempty"`
+	Error            string `json:"error,omitempty"`
+	Code             string `json:"code,omitempty"`
 }
 
 type search struct {
@@ -78,11 +81,20 @@ func (sc *search) run(root, query string, opts Options) {
 	if reason == "" {
 		return
 	}
+	if opts.Contents {
+		code := files.CodeNotSupported
+		if reason == reasonError {
+			code = files.CodeIO
+		}
+		sc.publish(event{Kind: "error", Code: string(code), Reason: reason, Error: "indexed content search is unavailable (" + reason + ")"})
+		em.finish(true, 0)
+		return
+	}
 	sc.walk(em, targets, terms, opts, reason)
 }
 
 func (sc *search) walk(em *emitter, targets []string, terms []term, opts Options, reason string) {
-	sc.publish(event{Kind: "backend", Backend: "walk", Reason: reason})
+	sc.publish(event{Kind: "backend", Backend: "walk", Reason: reason, ContentAvailable: sc.svc.index.native != nil && sc.svc.index.enabled.Load() && reason != reasonNoIndex && reason != reasonError})
 	var excludes []string
 	if sc.svc.excludes != nil {
 		excludes = sc.svc.excludes()

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/duxlabs-dev/dux-go/files"
+	"github.com/duxlabs-dev/dux-go/nativebridge"
 )
 
 const (
@@ -45,13 +46,17 @@ type Service struct {
 }
 
 func NewService(bus Publisher, stater Stater) *Service {
-	return &Service{
+	s := &Service{
 		bus:      bus,
 		stater:   stater,
 		workers:  min(4, runtime.NumCPU()),
 		searches: map[string]*search{},
 		index:    indexBackend{now: time.Now, infoWait: infoTimeout, searchWait: searchTimeout},
 	}
+	if runtime.GOOS == "darwin" {
+		s.index.native = nativebridge.Call
+	}
+	return s
 }
 
 func (s *Service) SetIndexEnabled(enabled bool) { s.index.enabled.Store(enabled) }
@@ -91,6 +96,9 @@ func (s *Service) Close() {
 func (s *Service) Start(ctx context.Context, root, query string, opts Options) (id, topic string, err error) {
 	if err := validate(root, query, opts); err != nil {
 		return "", "", err
+	}
+	if opts.Contents && !s.index.enabled.Load() {
+		return "", "", &files.Error{Code: files.CodeNotSupported, Err: errors.New("indexed content search is unavailable")}
 	}
 	root = filepath.Clean(root)
 

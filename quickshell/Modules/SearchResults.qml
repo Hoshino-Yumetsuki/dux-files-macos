@@ -27,7 +27,7 @@ Rectangle {
     readonly property alias chips: chips
     readonly property string summary: {
         if (model.error !== "")
-            return FileFormat.listingError(model.errorCode);
+            return model.error;
         const notes = [];
         switch (true) {
         case model.loading:
@@ -48,7 +48,7 @@ Rectangle {
         if (model.partial)
             notes.push(I18n.tr("Some matches may be missing", "search results header note when the index could not return every candidate"));
         if (model.servedBy === "index") {
-            notes.push(model.indexPhase === "idle" || model.indexPhase === "" ? I18n.tr("From the index", "search results header note when danksearch served the search") : I18n.tr("Index is still building, results may be incomplete", "search results header note while danksearch is indexing"));
+            notes.push(model.indexPhase === "idle" || model.indexPhase === "" || model.indexPhase === "spotlight" ? I18n.tr("From the index", "search results header note when indexed search served the search") : I18n.tr("Index is still building, results may be incomplete", "search results header note while danksearch is indexing"));
             if (model.depthLimit > 0)
                 notes.push(I18n.tr("%1 levels deep", "search results header note giving how far below the folder the index reaches").arg(model.depthLimit));
         }
@@ -163,7 +163,7 @@ Rectangle {
                 return;
             if (chips.direct)
                 return;
-            results.indexAvailable = results.model.servedBy === "index";
+            results.indexAvailable = results.model.contentAvailable;
             if (!results.indexAvailable)
                 chips.contents = false;
         }
@@ -199,6 +199,7 @@ Rectangle {
         dropEnabled: false
         showSelectionFooter: true
         emptyText: ""
+        errorText: results.model.error
         surfaceColor: results.color
         cutSet: results.cutSet
         singleClickActivates: results.singleClickActivates

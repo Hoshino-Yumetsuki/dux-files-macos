@@ -44,6 +44,10 @@ func validate(root, query string, opts Options) error {
 		return &files.Error{Code: files.CodeInvalid, Path: root, Err: errors.New("root must be absolute")}
 	case opts.Scope != "" && opts.Scope != ScopeFolder && opts.Scope != ScopeHome && opts.Scope != ScopeEverywhere:
 		return &files.Error{Code: files.CodeInvalid, Err: errors.New("unknown scope: " + opts.Scope)}
+	case opts.Contents && opts.Direct:
+		return &files.Error{Code: files.CodeInvalid, Err: errors.New("content search requires an index; direct search only matches names and paths")}
+	case opts.Contents && strings.TrimSpace(query) == "":
+		return &files.Error{Code: files.CodeInvalid, Err: errors.New("content search needs a query")}
 	case strings.TrimSpace(query) == "" && !opts.filtered():
 		return &files.Error{Code: files.CodeInvalid, Err: errors.New("search needs a query or a filter")}
 	case opts.MinSize > 0 && opts.MaxSize > 0 && opts.MaxSize < opts.MinSize:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -57,7 +58,16 @@ func (f *fakeIndex) params(t *testing.T) map[string]any {
 
 func startFakeIndex(t *testing.T, fake *fakeIndex) {
 	t.Helper()
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	runtimeDir := t.TempDir()
+	if runtime.GOOS == "darwin" {
+		parent, err := os.MkdirTemp("/tmp", "dfi-")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.RemoveAll(parent) })
+		link := filepath.Join(parent, "r")
+		require.NoError(t, os.Symlink(runtimeDir, link))
+		runtimeDir = link
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	srv := ipc.NewServer(ipc.Config{AppName: indexApp, APIVersion: 1}, fake.handle)
 	require.NoError(t, srv.Listen())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -71,6 +81,7 @@ func startFakeIndex(t *testing.T, fake *fakeIndex) {
 func indexedService(t *testing.T, bus Publisher) *Service {
 	t.Helper()
 	svc := newTestService(t, bus)
+	svc.index.native = nil
 	svc.SetIndexEnabled(true)
 	svc.index.infoWait = 200 * time.Millisecond
 	svc.index.searchWait = 200 * time.Millisecond

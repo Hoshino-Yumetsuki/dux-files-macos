@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import qs.Services
+import qs.Modules
 import qs.DCommon.FileBrowser
 
 ShellRoot {
@@ -82,6 +83,10 @@ ShellRoot {
 
     readonly property SearchModel model: SearchModel {
         backend: fixture.fakeBackend
+    }
+
+    readonly property SearchResults results: SearchResults {
+        model: fixture.model
     }
 
     Component.onCompleted: {
@@ -216,6 +221,30 @@ ShellRoot {
         });
         check("done reports partial", [model.partial, model.loading], [true, false]);
         check("path lookup follows the sorted rows", [model.indexOfPath("/tmp/c.txt"), model.indexOfPath("/tmp/d.txt"), model.indexOfPath("/tmp/nope")], [2, 4, -1]);
+
+        model.start();
+        fakeBackend.searchEvent({
+            "searchId": "s4",
+            "kind": "backend",
+            "backend": "walk",
+            "reason": "HIDDEN",
+            "contentAvailable": true
+        });
+        check("walked names retain native content search", results.chips.contentsAvailable, true);
+        results.chips.contents = true;
+        check("content search can be selected after a walk", results.chips.filterState.contents, true);
+        fakeBackend.searchEvent({"searchId": "s4", "kind": "done"});
+        model.start();
+        fakeBackend.searchEvent({"searchId": "s5", "kind": "backend", "backend": "index", "phase": "spotlight"});
+        check("Spotlight is not described as building", results.summary.includes("Index is still building"), false);
+        fakeBackend.searchEvent({"searchId": "s5", "kind": "error", "code": "EACCES", "reason": "ERROR", "error": "Spotlight access denied"});
+        fakeBackend.searchEvent({"searchId": "s5", "kind": "done", "partial": true});
+        check("asynchronous errors retain their detail", [model.errorCode, model.error, model.loading, results.summary, results.body.errorText], ["EACCES", "Spotlight access denied", false, "Spotlight access denied", "Spotlight access denied"]);
+
+        model.start();
+        fakeBackend.searchEvent({"searchId": "s6", "kind": "backend", "backend": "walk"});
+        check("walk without an index hides content search", [results.chips.contentsAvailable, results.chips.filterState.contents], [false, false]);
+        fakeBackend.searchEvent({"searchId": "s6", "kind": "done"});
 
         startResponse = {
             "error": "not a directory",

@@ -23,6 +23,8 @@ type searchEvent struct {
 	Phase      string            `json:"phase"`
 	DepthLimit int               `json:"depthLimit"`
 	Reason     string            `json:"reason"`
+	Error      string            `json:"error"`
+	Code       string            `json:"code"`
 }
 
 var (
@@ -80,7 +82,11 @@ var searchCmd = &cobra.Command{
 				return printJSON(map[string]any{"entries": found, "count": done.Count, "truncated": done.Truncated, "partial": done.Partial, "unreadable": done.Unreadable, "backend": map[string]any{"name": done.Backend, "phase": done.Phase, "depthLimit": done.DepthLimit, "reason": done.Reason}})
 			}
 			if done.Backend == "index" {
-				fmt.Fprintf(os.Stderr, "dfiles: served by the danksearch index (%s)\n", done.Phase)
+				if done.Phase == "spotlight" {
+					fmt.Fprintln(os.Stderr, "dfiles: served by Spotlight")
+				} else {
+					fmt.Fprintf(os.Stderr, "dfiles: served by the danksearch index (%s)\n", done.Phase)
+				}
 			}
 			if done.Partial {
 				fmt.Fprintln(os.Stderr, "dfiles: some matches may be missing")
@@ -124,6 +130,11 @@ func runSearch(s *session, params map[string]any, onEntry func(json.RawMessage))
 			for _, raw := range batch.Entries {
 				onEntry(raw)
 			}
+		case "error":
+			if batch.Error != "" {
+				return batch, fmt.Errorf("search failed (%s, %s): %s", batch.Code, batch.Reason, batch.Error)
+			}
+			return batch, fmt.Errorf("search failed (%s, %s)", batch.Code, batch.Reason)
 		case "done":
 			batch.Backend, batch.Phase, batch.DepthLimit, batch.Reason = backend.Backend, backend.Phase, backend.DepthLimit, backend.Reason
 			return batch, nil
@@ -137,7 +148,7 @@ func init() {
 	searchCmd.Flags().BoolVar(&searchCrossDeviceFlag, "cross-device", false, "Follow into other filesystems")
 	searchCmd.Flags().BoolVar(&searchIgnoredFlag, "include-ignored", false, "Walk heavy folders, gitignored entries and excluded folders too")
 	searchCmd.Flags().BoolVar(&searchFuzzyFlag, "fuzzy", false, "Also accept terms whose letters appear in order")
-	searchCmd.Flags().BoolVar(&searchContentsFlag, "contents", false, "Match indexed file contents (needs a running dsearch)")
+	searchCmd.Flags().BoolVar(&searchContentsFlag, "contents", false, "Match indexed file contents (requires a content-search backend)")
 	searchCmd.Flags().StringVar(&searchScopeFlag, "scope", "folder", "folder, home or everywhere")
 	searchCmd.Flags().BoolVar(&searchDirectFlag, "direct", false, "Walk the disk even when the danksearch index could answer")
 	searchCmd.Flags().IntVar(&searchLimitFlag, "limit", 0, "Stop after this many results (at most and by default 10000)")

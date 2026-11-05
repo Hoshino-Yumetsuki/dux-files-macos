@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -150,6 +152,40 @@ func TestSearchStreamsWithoutADaemon(t *testing.T) {
 	assert.ElementsMatch(t, []string{filepath.Join(tree, "report.txt"), filepath.Join(tree, "a", "report-2.txt")}, paths)
 	assert.Equal(t, 2, done.Count)
 	assert.False(t, done.Truncated)
+}
+
+func TestSearchReportsBackendError(t *testing.T) {
+	client, server := net.Pipe()
+	s := newSession(client, bufio.NewReader(client), func() {})
+	defer s.Close()
+	go func() {
+		defer server.Close()
+		decoder := json.NewDecoder(server)
+		encoder := json.NewEncoder(server)
+		var req struct {
+			ID int `json:"id"`
+		}
+		if decoder.Decode(&req) != nil {
+			return
+		}
+		if encoder.Encode(map[string]any{"id": req.ID, "result": map[string]any{"searchId": "s1", "topic": "search:s1"}}) != nil {
+			return
+		}
+		if decoder.Decode(&req) != nil {
+			return
+		}
+		if encoder.Encode(map[string]any{"id": req.ID, "result": map[string]any{}}) != nil {
+			return
+		}
+		_ = encoder.Encode(map[string]any{"event": "search:s1", "data": map[string]any{"searchId": "s1", "kind": "error", "code": "EACCES", "reason": "ERROR", "error": "Spotlight access denied"}})
+	}()
+	var entries []json.RawMessage
+	_, err := runSearch(s, map[string]any{"root": "/tmp", "query": "report", "contents": true}, func(entry json.RawMessage) {
+		entries = append(entries, entry)
+	})
+	require.ErrorContains(t, err, "Spotlight access denied")
+	assert.ErrorContains(t, err, "EACCES")
+	assert.Empty(t, entries)
 }
 
 func TestFindDevice(t *testing.T) {
