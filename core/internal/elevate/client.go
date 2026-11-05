@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,9 +49,17 @@ func NewClient() *Client {
 	return &Client{}
 }
 
-func (c *Client) Route() string { return "pkexec" }
+func (c *Client) Route() string {
+	if runtime.GOOS != "linux" {
+		return ""
+	}
+	return "pkexec"
+}
 
 func (c *Client) Available() error {
+	if runtime.GOOS != "linux" {
+		return &fileops.Unavailable{Reason: "NOROUTE"}
+	}
 	if portal.InFlatpak() {
 		return &fileops.Unavailable{Reason: ReasonSandboxed}
 	}
@@ -133,6 +142,9 @@ func annotatedPath(policy string) string {
 }
 
 func (c *Client) command(op string, args ...string) (*exec.Cmd, error) {
+	if runtime.GOOS != "linux" {
+		return nil, &fileops.Unavailable{Reason: "NOROUTE"}
+	}
 	pkexec, err := c.pkexecPath()
 	if err != nil {
 		return nil, &fileops.Unavailable{Reason: ReasonNoPkexec}

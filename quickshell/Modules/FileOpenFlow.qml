@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import qs.Common
 import qs.Services
 import qs.DCommon.FileBrowser
@@ -20,7 +21,7 @@ QtObject {
 
     function reportError(response) {
         if (response.error)
-            ToastService.info(FileFormat.operationError(response.code, response.error));
+            ToastService.info(Qt.platform.os === "osx" && response.code === "EIO" ? response.error : FileFormat.operationError(response.code, response.error));
     }
 
     function activate(entry) {
@@ -30,7 +31,7 @@ QtObject {
             offerRestore([entry]);
             return;
         }
-        if (entry.isDir) {
+        if (isFolder(entry)) {
             activePane.navigate(entry.path);
             return;
         }
@@ -73,10 +74,14 @@ QtObject {
         }
         dialogs.confirmOpen(plan, String(entries.length));
     }
+    function isFolder(entry) {
+        return entry.isDir && !(Qt.platform.os === "osx" && NativePlatform.isPackage(entry.path));
+    }
+
 
     function openPlan(entries, extractArchives) {
-        const folders = entries.filter(entry => entry.isDir).map(entry => entry.path);
-        const files = entries.filter(entry => !entry.isDir);
+        const folders = entries.filter(entry => isFolder(entry)).map(entry => entry.path);
+        const files = entries.filter(entry => !isFolder(entry));
         const unpacks = entry => extractArchives && FilesFormat.extractable(entry.mime);
         return {
             "folder": folders[0] ?? "",

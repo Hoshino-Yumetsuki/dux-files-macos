@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -75,6 +76,9 @@ func heroicGroup(home string) Group {
 			continue
 		}
 		games := heroicGames(root)
+		if runtime.GOOS == "darwin" {
+			games = append(games, heroicInstalled(root)...)
+		}
 		if len(games) == 0 {
 			continue
 		}
@@ -153,6 +157,52 @@ func heroicGames(root string) []Place {
 			}
 			places = append(places, Place{Path: config.WinePrefix, Kind: KindPrefix, Detail: title})
 		}
+	}
+	sortPlaces(places)
+	return places
+}
+
+func heroicInstalled(root string) []Place {
+	type installedGame struct {
+		Path  string `json:"install_path"`
+		Title string `json:"title"`
+	}
+	var games []installedGame
+	if data, err := os.ReadFile(filepath.Join(root, "gog_store", "installed.json")); err == nil {
+		var manifest struct {
+			Installed []installedGame `json:"installed"`
+		}
+		if json.Unmarshal(data, &manifest) == nil {
+			games = append(games, manifest.Installed...)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "legendaryConfig", "legendary", "installed.json")); err == nil {
+		var manifest map[string]installedGame
+		if json.Unmarshal(data, &manifest) == nil {
+			for _, game := range manifest {
+				games = append(games, game)
+			}
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "nile_config", "installed.json")); err == nil {
+		var manifest []struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(data, &manifest) == nil {
+			for _, game := range manifest {
+				games = append(games, installedGame{Path: game.Path})
+			}
+		}
+	}
+	var places []Place
+	for _, game := range games {
+		if !filepath.IsAbs(game.Path) || !isDir(game.Path) {
+			continue
+		}
+		if game.Title == "" {
+			game.Title = filepath.Base(filepath.Clean(game.Path))
+		}
+		places = append(places, Place{Path: game.Path, Kind: KindLibrary, Detail: game.Title})
 	}
 	sortPlaces(places)
 	return places
@@ -247,18 +297,26 @@ func steamLibraries(root string) []string {
 }
 
 func steamRoots(home string) []string {
-	return []string{
+	roots := []string{
 		filepath.Join(dataHome(home), "Steam"),
 		filepath.Join(home, ".steam", "steam"),
 		filepath.Join(home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"),
 	}
+	if runtime.GOOS == "darwin" {
+		roots = append(roots, filepath.Join(home, "Library", "Application Support", "Steam"))
+	}
+	return roots
 }
 
 func heroicRoots(home string) []string {
-	return []string{
+	roots := []string{
 		filepath.Join(home, ".config", "heroic"),
 		filepath.Join(home, ".var", "app", "com.heroicgameslauncher.hgl", "config", "heroic"),
 	}
+	if runtime.GOOS == "darwin" {
+		roots = append(roots, filepath.Join(home, "Library", "Application Support", "heroic"))
+	}
+	return roots
 }
 
 func lutrisRoots(home string) []string {

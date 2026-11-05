@@ -1,6 +1,8 @@
 package devices
 
 import (
+	"context"
+	"runtime"
 	"sync"
 	"time"
 
@@ -22,6 +24,10 @@ type Bus interface {
 }
 
 type Service struct {
+	native        func(context.Context, string, any, any) error
+	nativeMu      sync.Mutex
+	nativeDevices []Device
+
 	bus     Publisher
 	uid     uint32
 	usage   *usageCache
@@ -42,17 +48,28 @@ type Snapshot struct {
 }
 
 func NewService(bus Publisher, uid uint32) *Service {
+	reason := "udisks2 is not running"
+	if runtime.GOOS != "linux" {
+		reason = "udisks2 is unavailable on this platform"
+	}
 	return &Service{
 		bus:     bus,
 		uid:     uid,
 		usage:   newUsageCache(),
 		stop:    make(chan struct{}),
 		objects: Objects{},
-		reason:  "udisks2 is not running",
+		reason:  reason,
 	}
 }
 
 func (s *Service) Start() error {
+	if runtime.GOOS == "darwin" {
+		return s.startNative()
+	}
+	if runtime.GOOS != "linux" {
+		s.setReason("udisks2 is unavailable on this platform")
+		return nil
+	}
 	conn, err := dbus.ConnectSystemBus()
 	if err != nil {
 		s.setReason("the system bus is unavailable")
@@ -229,6 +246,9 @@ func (s *Service) setReason(reason string) {
 func (s *Service) Snapshot() Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.native != nil {
+		return Snapshot{Available: s.available, Reason: s.reason, Devices: append([]Device{}, s.nativeDevices...)}
+	}
 	return Snapshot{Available: s.available, Reason: s.reason, Devices: List(s.objects, s.uid)}
 }
 

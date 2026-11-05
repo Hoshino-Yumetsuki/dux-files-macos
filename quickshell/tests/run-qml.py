@@ -7,10 +7,10 @@ shell  every tests/qml/*.qml as the shell.qml of a scratch root built from
        symlinks to the repo tree, in its own offscreen Quickshell with a
        throwaway HOME and XDG tree, no socket and no session bus
 
-Each fixture logs `FIXTURE PASS` when every check passed. A missing marker, a
-non-zero exit, a QML error line before the marker or a timeout fails the run
-and prints that fixture's full log. Warnings after the marker are engine
-teardown and ignored.
+Each fixture logs `FIXTURE PASS` when every check passed. A missing marker,
+non-zero exit, QtTest assertion failure, QML error before the marker or timeout
+fails the run and prints the full log. Other warnings after the marker are
+engine teardown and ignored.
 """
 
 import argparse
@@ -75,14 +75,23 @@ def isolated_env(root):
     return env
 
 
-def scratch_root(root, fixture):
+def scratch_root(root, fixture, source=shell_dir):
     harness = root / "shell"
     harness.mkdir()
-    for entry in shell_dir.iterdir():
+    for entry in source.iterdir():
         if entry.name in ("shell.qml", "scripts", "tests", ".qmlls.ini"):
             continue
         (harness / entry.name).symlink_to(entry)
-    shutil.copy(fixture, harness / "shell.qml")
+    source_text = fixture.read_text()
+    if "TestCase {" in source_text:
+        source_text = source_text.replace("TestCase {", """TestCase {
+        onCompletedChanged: {
+            if (completed && qtest_results.failCount > 0) {
+                console.error("QML test failures: " + qtest_results.failCount);
+                Qt.exit(1);
+            }
+        }""")
+    (harness / "shell.qml").write_text(source_text)
     if fixture.stem == "preview":
         for name in ("preview.pdf", "preview.png"):
             shutil.copy(tests_dir / "qml" / name, harness / name)
@@ -103,19 +112,26 @@ def communicate(process, timeout):
         return output + "\nfixture timed out", True
 
 
-def run_fixture(fixture, qs):
+def run_fixture(fixture, qs, native=False):
     started = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix="dfiles-fixture-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="df-", dir="/tmp" if native else None) as tmp:
         root = Path(tmp)
-        harness = scratch_root(root, fixture)
+        source = Path(qs).resolve().parents[1] / "Resources/qml/qs" if native else shell_dir
+        harness = scratch_root(root, fixture, source)
         env = isolated_env(root)
-        process, error = start([qs, "-p", str(harness)], root, env)
+        if native:
+            config = Path(env["XDG_CONFIG_HOME"]) / "dfiles"
+            config.mkdir(parents=True)
+            (config / "ui-settings.json").write_text('{"language":"en"}')
+            env["LC_ALL"] = "en_US.UTF-8"
+        command = [qs, "--no-backend", "-p", str(harness)] if native else [qs, "-p", str(harness)]
+        process, error = start(command, root, env)
         if process is None:
             return fixture.stem, False, time.monotonic() - started, error
         output, timed_out = communicate(process, fixture_timeout)
     output = ansi.sub("", output)
     checks, marker, _ = output.partition("FIXTURE PASS")
-    passed = not timed_out and process.returncode == 0 and marker != "" and not qml_error.search(checks)
+    passed = not timed_out and process.returncode == 0 and marker != "" and not qml_error.search(checks) and "QML test failures:" not in output
     return fixture.stem, passed, time.monotonic() - started, output
 
 
@@ -143,27 +159,29 @@ def report(name, passed, elapsed, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--jobs", type=int, default=max(1, min(4, len(os.sched_getaffinity(0)) // 2)))
+    cpu_count = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+    parser.add_argument("--jobs", type=int, default=max(1, min(4, cpu_count // 2)))
+    parser.add_argument("--macos-host", type=Path, help="Run staged QML with a built macOS app executable instead of Quickshell")
     parser.add_argument("suites", nargs="*", choices=["logic", "shell"])
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error("--jobs must be positive")
     selected = args.suites or ["logic", "shell"]
 
-    jobs = []
-    if "logic" in selected:
-        jobs.append((run_logic, ()))
-    if "shell" in selected:
-        qs = quickshell()
-        fixtures = sorted((tests_dir / "qml").glob("*.qml"))
-        if not fixtures:
-            raise SystemExit("no fixtures under quickshell/tests/qml")
-        jobs.extend((run_fixture, (fixture, qs)) for fixture in fixtures)
-
-    started = time.monotonic()
     failed = False
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        futures = [pool.submit(fn, *fn_args) for fn, fn_args in jobs]
+        futures = []
+        if "logic" in selected:
+            futures.append(pool.submit(run_logic))
+        if "shell" in selected:
+            qs = str(args.macos_host.resolve()) if args.macos_host else quickshell()
+            fixtures = sorted((tests_dir / "qml").glob("*.qml"))
+            if args.macos_host:
+                fixtures = [fixture for fixture in fixtures if fixture.stem != "clipboard"]
+            if not fixtures:
+                raise SystemExit("no fixtures under quickshell/tests/qml")
+            futures.extend(pool.submit(run_fixture, fixture, qs, args.macos_host is not None) for fixture in fixtures)
+        started = time.monotonic()
         for future in as_completed(futures):
             name, passed, elapsed, output = future.result()
             failed = failed or not passed

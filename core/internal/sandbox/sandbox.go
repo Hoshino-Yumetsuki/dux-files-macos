@@ -2,7 +2,10 @@ package sandbox
 
 import (
 	"maps"
+	"runtime"
 	"sync"
+
+	"github.com/duxlabs-dev/dux-go/nativebridge"
 )
 
 const (
@@ -55,6 +58,19 @@ func Current() Capabilities {
 		probe := newOSProbe()
 		defer probe.close()
 		current = Detect(probe)
+		if runtime.GOOS == "darwin" {
+			current.UDisks, current.Gvfs = false, false
+			for _, name := range []string{"devices", "network", "elevation", "portalChooser", "setDefault", "indexSearch", "clipboard"} {
+				current.Features[name] = Feature{Reason: "NOTSUPPORTED"}
+			}
+			current.Features["trash"] = Feature{Available: true, Degraded: true, Reason: "APPTRASH"}
+			current.Features["openWith"] = Feature{Available: true, Degraded: true, Reason: "APPBUNDLEPATH"}
+			if nativebridge.Available() {
+				for _, name := range []string{"devices", "network", "setDefault", "indexSearch", "clipboard", "trash", "openWith"} {
+					current.Features[name] = Feature{Available: true}
+				}
+			}
+		}
 	})
 	return current
 }

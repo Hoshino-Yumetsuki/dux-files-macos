@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -84,6 +86,25 @@ func (s terminalSpec) argv(dir string) []string {
 }
 
 func Terminals() []string {
+	if runtime.GOOS == "darwin" {
+		out := []string{"Terminal.app"}
+		home, _ := os.UserHomeDir()
+		for _, name := range []string{"iTerm", "Ghostty", "kitty", "Alacritty", "WezTerm"} {
+			for _, root := range []string{filepath.Join(home, "Applications"), "/Applications"} {
+				app := filepath.Join(root, name+".app")
+				if info, err := os.Stat(app); err == nil && info.IsDir() {
+					out = append(out, app)
+					break
+				}
+			}
+		}
+		for _, spec := range knownTerminals {
+			if _, err := exec.LookPath(spec.command); err == nil {
+				out = append(out, spec.command)
+			}
+		}
+		return out
+	}
 	var out []string
 	for _, spec := range knownTerminals {
 		if _, err := exec.LookPath(spec.command); err == nil {

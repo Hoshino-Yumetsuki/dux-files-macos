@@ -2,19 +2,33 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/duxlabs-dev/dux-files/core/internal/shellembed"
 	"github.com/duxlabs-dev/dux-go/shellapp"
 )
 
-var shellApp = shellapp.New(shellapp.Config{
-	ID:       "dfiles",
-	QSAppID:  "dev.duxlabs.files",
-	Version:  Version,
-	Embedded: embeddedShell{},
-	Boot:     bootBackend,
-	ExtraEnv: uiEnv,
-})
+var shellApp = newShellApp()
+
+func newShellApp() *shellapp.App {
+	var app *shellapp.App
+	cfg := shellapp.Config{
+		ID:       "dfiles",
+		QSAppID:  "dev.duxlabs.files",
+		Version:  Version,
+		Embedded: embeddedShell{},
+		Boot:     func(ctx context.Context) (shellapp.Backend, error) { return bootBackend(ctx, app) },
+		ExtraEnv: uiEnv,
+	}
+	if runtime.GOOS == "darwin" {
+		cfg.NativeHost = "Dux Files"
+		cfg.ShowMethod = "ui.show"
+	}
+	app = shellapp.New(cfg)
+	return app
+}
 
 var (
 	dbusActivated   bool
@@ -33,7 +47,16 @@ func uiEnv(string) []string {
 	return env
 }
 
-func bootBackend(ctx context.Context) (shellapp.Backend, error) {
+func bootBackend(ctx context.Context, app *shellapp.App) (shellapp.Backend, error) {
+	if _, overridden := os.LookupEnv("DFILES_NATIVE_HELPER"); runtime.GOOS == "darwin" && !overridden {
+		host, err := app.NativeHostPath()
+		if err != nil {
+			return nil, err
+		}
+		if err := os.Setenv("DFILES_NATIVE_HELPER", filepath.Join(filepath.Dir(host), "dfiles-native")); err != nil {
+			return nil, err
+		}
+	}
 	svc, err := bootDaemonServices(ctx, true)
 	if err != nil {
 		return nil, err

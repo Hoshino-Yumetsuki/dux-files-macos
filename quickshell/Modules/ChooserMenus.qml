@@ -109,7 +109,7 @@ Item {
         forPicker: true
         selectionCount: live ? menus.pane.selectedEntries.length : 0
         hasDirectory: live && menus.pane.selectedEntries.length > 0 && menus.pane.selectedEntries.every(entry => entry.isDir)
-        hasClipboard: live && ClipboardService.hasFiles
+        hasClipboard: live && ClipboardService.hasPaste
         onActionTriggered: id => menus.runAction(id)
         onClosed: live = false
     }
@@ -120,7 +120,7 @@ Item {
         anchorItem: menus
         forPicker: true
         forFolder: true
-        hasClipboard: ClipboardService.hasFiles
+        hasClipboard: ClipboardService.hasPaste
         onActionTriggered: id => menus.runAction(id)
     }
 

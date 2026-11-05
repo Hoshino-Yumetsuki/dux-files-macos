@@ -37,17 +37,17 @@ OverlayDialog {
     }
 
     function present(target, result) {
+        const path = localPath(result);
+        if (path !== "") {
+            connected(path);
+            close();
+            return;
+        }
         if (result.shares) {
             showShares(result);
             return;
         }
-        const path = localPath(result);
-        if (path === "") {
-            showFailure(target, result);
-            return;
-        }
-        connected(path);
-        close();
+        showFailure(target, result);
     }
 
     function localPath(result) {

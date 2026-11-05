@@ -25,14 +25,16 @@ type Stater interface {
 }
 
 type runner struct {
-	job         *job
-	stater      Stater
-	conflictAll Action
-	errorAll    Action
-	elevateRest bool
-	password    string
-	scanned     map[string]scanResult
-	estimating  bool
+	job            *job
+	stater         Stater
+	conflictAll    Action
+	errorAll       Action
+	elevateRest    bool
+	password       string
+	scanned        map[string]scanResult
+	estimating     bool
+	pending        *[]pendingRemoval
+	pendingInvalid bool
 }
 
 func execute(j *job) error {

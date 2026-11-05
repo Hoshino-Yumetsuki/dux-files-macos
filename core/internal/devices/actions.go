@@ -8,6 +8,9 @@ import (
 var noOptions = map[string]dbus.Variant{}
 
 func (s *Service) Mount(id string) (string, error) {
+	if s.native != nil {
+		return s.nativeAction("mount", id, nil)
+	}
 	device, err := s.mountable(id)
 	if err != nil {
 		return "", err
@@ -26,6 +29,10 @@ func (s *Service) Mount(id string) (string, error) {
 }
 
 func (s *Service) Unmount(id string, force bool) error {
+	if s.native != nil {
+		_, err := s.nativeAction("unmount", id, map[string]any{"force": force})
+		return err
+	}
 	device, err := s.mountable(id)
 	if err != nil {
 		return err
@@ -50,6 +57,10 @@ func (s *Service) Unmount(id string, force bool) error {
 }
 
 func (s *Service) Eject(id string) error {
+	if s.native != nil {
+		_, err := s.nativeAction("eject", id, nil)
+		return err
+	}
 	device, found := s.find(id)
 	if !found {
 		return fail(files.CodeNotFound, "unknown device: %s", id)
@@ -76,6 +87,10 @@ func (s *Service) Eject(id string) error {
 }
 
 func (s *Service) PowerOff(id string) error {
+	if s.native != nil {
+		_, err := s.nativeAction("powerOff", id, nil)
+		return err
+	}
 	device, found := s.find(id)
 	if !found {
 		return fail(files.CodeNotFound, "unknown device: %s", id)
@@ -90,6 +105,9 @@ func (s *Service) PowerOff(id string) error {
 }
 
 func (s *Service) Unlock(id, passphrase string) (string, error) {
+	if s.native != nil {
+		return s.nativeAction("unlock", id, map[string]any{"passphrase": passphrase})
+	}
 	device, found := s.find(id)
 	if !found {
 		return "", fail(files.CodeNotFound, "unknown device: %s", id)
@@ -109,6 +127,10 @@ func (s *Service) Unlock(id, passphrase string) (string, error) {
 }
 
 func (s *Service) Lock(id string) error {
+	if s.native != nil {
+		_, err := s.nativeAction("lock", id, nil)
+		return err
+	}
 	device, found := s.find(id)
 	if !found {
 		return fail(files.CodeNotFound, "unknown device: %s", id)
@@ -162,6 +184,11 @@ func (s *Service) checkDetach(device Device, wholeDrive bool) error {
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	for _, sibling := range s.nativeDevices {
+		if sibling.Drive == device.Drive && sibling.Protected {
+			return fail(CodePerm, "%s contains a protected system mount", device.Drive)
+		}
+	}
 	cleartext := cleartextByBacking(s.objects)
 	for path, ifaces := range s.objects {
 		if objectOf(ifaces[BlockIface]["Drive"]) != device.Drive {

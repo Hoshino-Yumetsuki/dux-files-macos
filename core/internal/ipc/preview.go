@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"unicode/utf8"
 
+	"github.com/duxlabs-dev/dux-go/files"
 	"github.com/duxlabs-dev/dux-go/ipc/params"
 	_ "golang.org/x/image/bmp"
 	_ "golang.org/x/image/tiff"
@@ -77,6 +78,11 @@ func HandleImageSize(_ context.Context, w *ConnWriter, req Request) {
 }
 
 func openRegular(path string) (*os.File, os.FileInfo, error) {
+	if info, err := os.Stat(path); err != nil {
+		return nil, nil, err
+	} else if files.IsDataless(info) {
+		return nil, nil, errors.New("file contents are not local")
+	}
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, nil, err

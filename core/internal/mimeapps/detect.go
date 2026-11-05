@@ -1,7 +1,11 @@
 package mimeapps
 
 import (
+	"mime"
+	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"unicode/utf8"
 )
@@ -18,15 +22,34 @@ const magicWinsPriority = 80
 const minSniffExtent = 256
 
 type Detector struct {
-	db   *DB
-	bufs sync.Pool
+	db     *DB
+	bufs   sync.Pool
+	native bool
 }
 
 func NewDetector(db *DB) *Detector { return &Detector{db: db} }
 
 func (d *Detector) DB() *DB { return d.db }
 
-func (d *Detector) FromName(name string) string { return d.db.globs.match(name) }
+func (d *Detector) FromName(name string) string {
+	if matched := d.db.globs.match(name); matched != "" || !d.native {
+		return matched
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	switch ext {
+	case ".mov", ".qt":
+		return "video/quicktime"
+	case ".m4v":
+		return "video/mp4"
+	case ".mkv":
+		return "video/x-matroska"
+	case ".heic":
+		return "image/heic"
+	case ".heif":
+		return "image/heif"
+	}
+	return StripParams(mime.TypeByExtension(ext))
+}
 
 func (d *Detector) Sniff(path string) string {
 	buf := d.borrow()
@@ -36,7 +59,7 @@ func (d *Detector) Sniff(path string) string {
 	if !ok {
 		return ""
 	}
-	if mimeType, _ := d.db.sniffData(head); mimeType != "" {
+	if mimeType, _ := d.sniffData(head); mimeType != "" {
 		return mimeType
 	}
 	if looksTextual(head) {
@@ -61,7 +84,7 @@ func (d *Detector) Detect(path string, isDir bool) string {
 		return globbed
 	}
 
-	sniffed, priority := d.db.sniffData(head)
+	sniffed, priority := d.sniffData(head)
 	switch {
 	case sniffed == "" && globbed != "":
 		return globbed
@@ -73,6 +96,17 @@ func (d *Detector) Detect(path string, isDir bool) string {
 		return sniffed
 	}
 	return globbed
+}
+
+func (d *Detector) sniffData(head []byte) (string, int) {
+	if matched, priority := d.db.sniffData(head); matched != "" || !d.native {
+		return matched, priority
+	}
+	matched := StripParams(http.DetectContentType(head))
+	if matched == TypeBinary || matched == TypeText {
+		return "", 0
+	}
+	return matched, 0
 }
 
 func (d *Detector) MimeIcon(mimeType string) (specific, generic string) {
@@ -97,7 +131,11 @@ func (d *Detector) borrow() *[]byte {
 	if buf, ok := d.bufs.Get().(*[]byte); ok {
 		return buf
 	}
-	buf := make([]byte, max(d.db.maxExtent, minSniffExtent))
+	extent := max(d.db.maxExtent, minSniffExtent)
+	if d.native {
+		extent = max(extent, 512)
+	}
+	buf := make([]byte, extent)
 	return &buf
 }
 

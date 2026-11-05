@@ -54,7 +54,7 @@ QtObject {
     }
 
     function rowChanged(current, next) {
-        return current.mtimeMs !== next.mtimeMs || current.size !== next.size;
+        return current.mtimeMs !== next.mtimeMs || current.size !== next.size || current.dataless !== next.dataless;
     }
 
     function refresh() {

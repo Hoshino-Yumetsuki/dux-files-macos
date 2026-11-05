@@ -64,6 +64,9 @@ func (s *Service) Portables() []Portable {
 }
 
 func (s *Service) MountPortable(monitor, id string) error {
+	if s.native != nil {
+		return fail(files.CodeNotSupported, "MTP and camera devices are not exposed as mountable volumes by the native backend")
+	}
 	conn := s.connection()
 	if conn == nil {
 		return fail(files.CodeNotSupported, "gvfs is not running")

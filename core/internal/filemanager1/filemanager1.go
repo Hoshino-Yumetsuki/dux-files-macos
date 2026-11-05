@@ -1,6 +1,7 @@
 package filemanager1
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strconv"
@@ -55,6 +56,8 @@ type Service struct {
 	conn    *dbus.Conn
 	enabled bool
 	reason  string
+	native  func(context.Context, string, any, any) error
+	state   string
 }
 
 type object struct{ handler Handler }
@@ -94,6 +97,9 @@ func New(conn *dbus.Conn, handler Handler) (*Service, error) {
 func (s *Service) SetEnabled(enabled bool) Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.native != nil {
+		return s.setNative(enabled)
+	}
 	switch {
 	case enabled && !s.enabled:
 		s.request()
@@ -132,6 +138,9 @@ func (s *Service) Status() Status {
 }
 
 func (s *Service) statusLocked() Status {
+	if s.native != nil {
+		return s.nativeStatus()
+	}
 	owned, holder := s.ownerLocked()
 	return Status{
 		Available: true,
@@ -165,6 +174,9 @@ func (s *Service) ownerLocked() (bool, string) {
 func (s *Service) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.native != nil {
+		return
+	}
 	if s.enabled {
 		s.release()
 	}

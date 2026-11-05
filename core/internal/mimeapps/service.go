@@ -9,11 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/duxlabs-dev/dux-go/files"
+	"github.com/duxlabs-dev/dux-go/nativebridge"
 )
 
 func fail(code files.Code, format string, args ...any) error {
@@ -23,10 +25,18 @@ func fail(code files.Code, format string, args ...any) error {
 type Service struct {
 	detector *Detector
 	entries  *entryIndex
+	native   bool
+	call     func(context.Context, string, any, any) error
 	Opened   func(paths, mimes []string, app *Entry)
 }
 
-func NewService() *Service { return NewServiceForDirs(MimeDirs()) }
+func NewService() *Service {
+	s := NewServiceForDirs(MimeDirs())
+	s.native = runtime.GOOS == "darwin"
+	s.detector.native = s.native
+	s.call = nativebridge.Call
+	return s
+}
 
 func NewServiceForDirs(mimeDirs []string) *Service {
 	return &Service{detector: NewDetector(LoadDB(mimeDirs)), entries: newEntryIndex()}
@@ -34,9 +44,25 @@ func NewServiceForDirs(mimeDirs []string) *Service {
 
 func (s *Service) Detector() *Detector { return s.detector }
 
-func (s *Service) EntryByID(id string) *Entry { return s.entries.byIdentifier(id) }
+func (s *Service) EntryByID(id string) *Entry {
+	if s.native {
+		if !nativeAppID(id) {
+			return nil
+		}
+		var entry *Entry
+		if s.callNative(context.Background(), "apps.entry", map[string]any{"id": id}, &entry) != nil || entry == nil || entry.ID != filepath.Clean(id) {
+			return nil
+		}
+		return entry
+	}
+	return s.entries.byIdentifier(id)
+}
 
 func (s *Service) Apps() []*Entry {
+	if s.native {
+		result, _ := s.nativeApps(nil, true)
+		return result.Apps
+	}
 	var out []*Entry
 	for _, entry := range s.entries.all() {
 		if entry.NoDisplay || !entry.Launchable() {
@@ -66,6 +92,14 @@ func (s *Service) MimeOf(path string) (string, error) {
 	if err != nil {
 		return "", files.Wrap(path, err)
 	}
+	if s.native && !info.IsDir() {
+		var result struct {
+			Mime string `json:"mime"`
+		}
+		if err := s.callNative(context.Background(), "apps.mime", map[string]any{"path": path}, &result); err == nil && result.Mime != "" {
+			return result.Mime, nil
+		}
+	}
 	return s.detector.Detect(path, info.IsDir()), nil
 }
 
@@ -75,6 +109,9 @@ func (s *Service) Open(ctx context.Context, paths []string, opts LaunchOptions) 
 	}
 	if opts.Opener != "" {
 		return s.openViaCommand(paths, opts)
+	}
+	if s.native {
+		return s.openNative(ctx, "", paths)
 	}
 	if Sandboxed() {
 		return openViaPortal(ctx, paths, false)
@@ -129,6 +166,9 @@ func (s *Service) openViaCommand(paths []string, opts LaunchOptions) error {
 func (s *Service) OpenWith(ctx context.Context, desktopID string, paths []string, opts LaunchOptions) error {
 	if len(paths) == 0 {
 		return fail(files.CodeInvalid, "no paths given")
+	}
+	if s.native {
+		return s.openNative(ctx, desktopID, paths)
 	}
 	if Sandboxed() {
 		return openViaPortal(ctx, paths, true)
@@ -191,6 +231,16 @@ func (s *Service) OpenURI(ctx context.Context, uri string) error {
 			return fail(files.CodeInvalid, "invalid file uri %q", uri)
 		}
 		return s.Open(ctx, []string{path}, LaunchOptions{})
+	}
+	if s.native {
+		parsed, err := url.Parse(uri)
+		if err != nil || parsed.Scheme == "" || strings.ContainsRune(uri, 0) {
+			return fail(files.CodeInvalid, "invalid uri %q", uri)
+		}
+		if err := exec.CommandContext(ctx, "/usr/bin/open", "--", uri).Run(); err != nil {
+			return fail(files.CodeIO, "open uri: %v", err)
+		}
+		return nil
 	}
 	if Sandboxed() {
 		return openURIViaPortal(ctx, uri)

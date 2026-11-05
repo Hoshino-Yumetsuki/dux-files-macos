@@ -134,6 +134,9 @@ func (s *Service) handleLock(w *ipc.ConnWriter, req ipc.Request) {
 
 // The object table has not seen the cleartext device yet right after an unlock.
 func (s *Service) mountPath(path dbus.ObjectPath) (string, error) {
+	if s.native != nil {
+		return s.Mount(string(path))
+	}
 	var mountPoint string
 	if err := s.call(path, FsIface+".Mount", noOptions).Store(&mountPoint); err != nil {
 		return "", wrapDBus(err)

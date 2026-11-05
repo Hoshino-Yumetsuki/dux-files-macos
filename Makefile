@@ -25,7 +25,7 @@ SHELL_DIR=quickshell
 ASSETS_DIR=assets
 DESKTOP_ID=dev.duxlabs.files
 
-.PHONY: all build dev run clean test fmt vet lint-qml test-qml flatpak-build flatpak-run flatpak-lint flatpak-modules update-common i18n-extract i18n-local i18n-test i18n-push i18n-sync i18n-check install install-bin install-icon install-desktop install-metainfo install-polkit install-dbus install-portal install-systemd uninstall uninstall-bin uninstall-icon uninstall-desktop uninstall-metainfo uninstall-polkit uninstall-dbus uninstall-portal uninstall-systemd help
+.PHONY: macos macos-run macos-package all build dev run clean test fmt vet lint-qml test-qml flatpak-build flatpak-run flatpak-lint flatpak-modules update-common i18n-extract i18n-local i18n-test i18n-push i18n-sync i18n-check install install-bin install-icon install-desktop install-metainfo install-polkit install-dbus install-portal install-systemd uninstall uninstall-bin uninstall-icon uninstall-desktop uninstall-metainfo uninstall-polkit uninstall-dbus uninstall-portal uninstall-systemd help
 
 FLATPAK_MANIFEST=distro/flatpak/$(DESKTOP_ID).yml
 
@@ -77,6 +77,16 @@ lint-qml:
 
 test-qml:
 	@python3 $(SHELL_DIR)/tests/run-qml.py
+
+macos: dev
+	cmake -S macos -B builddir/macos-dev -DCMAKE_BUILD_TYPE=Debug $(CMAKE_ARGS)
+	cmake --build builddir/macos-dev --parallel
+
+macos-run: macos
+	"builddir/macos-dev/Dux Files.app/Contents/MacOS/Dux Files"
+
+macos-package:
+	sh macos/scripts/package.sh
 
 # Bump dux-qml-common everywhere it is pinned: submodule pointer + nix flake input.
 update-common:
@@ -189,6 +199,9 @@ help:
 	@echo "  build              - Build the dfiles binary (release flags, UI embedded)"
 	@echo "  dev                - Fast development build"
 	@echo "  run                - Build and run against the in-repo quickshell config"
+	@echo "  macos              - Build the macOS app with the original Dux QML interface"
+	@echo "  macos-run          - Build and launch the macOS app"
+	@echo "  macos-package      - Package with static Qt (QT_STATIC_PREFIX required)"
 	@echo "  clean / test / fmt / vet"
 	@echo "  lint-qml           - qmllint shell.qml through the Quickshell tooling VFS (needs quickshell/.qmlls.ini)"
 	@echo "  test-qml           - Run the shell logic tests and the offscreen QML fixtures"

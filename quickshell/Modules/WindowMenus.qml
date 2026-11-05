@@ -111,7 +111,8 @@ Item {
         anchorItem: menus.anchorItem
         selectionCount: live ? menus.mainWindow.selectedPaths().length : 0
         hasDirectory: live && menus.selectionIsDirectory()
-        hasClipboard: live && ClipboardService.hasFiles
+        hasClipboard: live && ClipboardService.hasPaste
+        hasClipboardFiles: live && ClipboardService.hasFiles
         shiftHeld: menus.shiftHeld
         extractable: live && menus.selectionIsExtractable()
         inResults: live && menus.mainWindow.activePane.resultsActive
@@ -235,7 +236,8 @@ Item {
 
         anchorItem: menus.anchorItem
         forFolder: true
-        hasClipboard: ClipboardService.hasFiles
+        hasClipboard: ClipboardService.hasPaste
+        hasClipboardFiles: ClipboardService.hasFiles
         inTrash: menus.mainWindow.activePane.trashActive
         inRecent: menus.mainWindow.activePane.recentActive
         trashCount: TrashService.count

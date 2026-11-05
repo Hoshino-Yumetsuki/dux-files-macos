@@ -3,6 +3,9 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import qs.Services
+import qs.Common
+import qs.DCommon.Common as DC
+import qs.Modules
 
 ShellRoot {
     id: fixture
@@ -16,6 +19,7 @@ ShellRoot {
     property var responses: ({})
     property var asks: []
     property var failedRequests: []
+    property var connectedPaths: []
 
     function check(label, actual, expected) {
         const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -119,8 +123,24 @@ ShellRoot {
         }
     }
 
+    FloatingWindow {
+        visible: true
+        width: 800
+        height: 600
+
+        ConnectServerDialog {
+            id: connectDialog
+            exit: Transition {}
+
+            onConnected: path => fixture.connectedPaths = fixture.connectedPaths.concat([path])
+        }
+    }
+
     Component.onCompleted: {
         DevicesService.transport = fakeTransport;
+        DC.Style.theme = Theme;
+        DC.I18n.backend = I18n;
+        DC.Paths.backend = Paths;
         NetworkService.transport = fakeTransport;
         check("one subscription per service", subscriptions, 2);
         check("a transport already connected loads at once", sent.map(request => request.method), ["devices.list", "devices.usage", "network.mounts", "network.recent"]);
@@ -283,6 +303,33 @@ ShellRoot {
                 "uri": "smb://nas/media"
             }
         ]);
+
+        responses["network.connect"] = {
+            "mount": mount("native", "network", {"path": "/Volumes/native"}),
+            "location": "/Volumes/native/folder",
+            "shares": []
+        };
+        connectDialog.ask();
+        connectDialog.submit("smb://native/folder");
+        check("native connect navigates to its location and closes", [connectedPaths, connectDialog.visible], [["/Volumes/native/folder"], false]);
+
+        responses["network.connect"] = {
+            "mount": mount("native", "network", {"path": "/Volumes/native"}),
+            "shares": []
+        };
+        connectDialog.ask();
+        connectDialog.submit("smb://native/");
+        check("native connect falls back to its mount path and closes", [connectedPaths, connectDialog.visible], [["/Volumes/native/folder", "/Volumes/native"], false]);
+
+        responses["network.connect"] = {"server": "smb://nas/", "shares": []};
+        connectDialog.ask();
+        connectDialog.submit("smb://nas/");
+        check("an empty server remains open for browsing", [connectDialog.visible, connectDialog.server, connectDialog.shares, connectedPaths], [true, "smb://nas/", [], ["/Volumes/native/folder", "/Volumes/native"]]);
+
+        responses["network.connect"] = {"server": "smb://nas/", "shares": [{"name": "media", "uri": "smb://nas/media"}]};
+        connectDialog.submit("smb://nas/");
+        check("a server's shares remain available for browsing", [connectDialog.visible, connectDialog.server, connectDialog.shares], [true, "smb://nas/", [{"name": "media", "uri": "smb://nas/media"}]]);
+        connectDialog.close();
 
         emit("network", {
             "kind": "mounts",

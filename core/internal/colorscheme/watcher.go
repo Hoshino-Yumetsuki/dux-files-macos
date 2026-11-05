@@ -43,6 +43,19 @@ func (w *Watcher) State() State {
 	return State{Available: w.available, ColorScheme: w.scheme}
 }
 
+func (w *Watcher) Update(state State) {
+	if state.ColorScheme > 2 {
+		return
+	}
+	w.mu.Lock()
+	changed := w.available != state.Available || w.scheme != state.ColorScheme
+	w.available, w.scheme = state.Available, state.ColorScheme
+	w.mu.Unlock()
+	if changed && w.publish != nil {
+		w.publish(Topic, state)
+	}
+}
+
 func (w *Watcher) Start() error {
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {

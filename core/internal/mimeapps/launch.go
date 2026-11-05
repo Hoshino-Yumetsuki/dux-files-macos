@@ -64,6 +64,9 @@ func workingDir(entry *Entry, opts LaunchOptions) string {
 }
 
 func (s *Service) OpenTerminal(dir, preferred string) error {
+	if s.native {
+		return s.openNativeTerminal(dir, preferred)
+	}
 	if Sandboxed() {
 		term := preferred
 		if term == "" {

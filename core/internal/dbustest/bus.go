@@ -5,8 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -29,6 +29,9 @@ const busConfig = `<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Con
 
 func Bus(t *testing.T) string {
 	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux D-Bus integration")
+	}
 	bin, err := exec.LookPath("dbus-daemon")
 	switch {
 	case err != nil && os.Getenv("CI") != "":
@@ -41,7 +44,7 @@ func Bus(t *testing.T) string {
 	require.NoError(t, os.WriteFile(config, []byte(strings.Replace(busConfig, "%s", dir, 1)), 0o600))
 
 	cmd := exec.Command(bin, "--config-file="+config, "--nofork", "--nopidfile", "--print-address")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	cmd.SysProcAttr = busProcessAttrs()
 	stdout, err := cmd.StdoutPipe()
 	require.NoError(t, err)
 	require.NoError(t, cmd.Start())

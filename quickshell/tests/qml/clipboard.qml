@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import qs.Services
+import qs.Modules
 
 ShellRoot {
     id: fixture
@@ -13,6 +14,13 @@ ShellRoot {
     property var nextResult: ({})
     property string nextError: ""
     property var reads: []
+
+    FileContextMenu {
+        id: imageMenu
+        forFolder: true
+        hasClipboard: true
+        hasClipboardFiles: false
+    }
 
     function check(label, actual, expected) {
         const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -48,6 +56,9 @@ ShellRoot {
 
     Component.onCompleted: {
         ClipboardService.transport = transport;
+        check("image clipboard enables paste", imageMenu.entries.find(row => row.id === "paste").enabled, true);
+        check("image clipboard cannot paste as a link", imageMenu.entries.find(row => row.id === "pasteLink").enabled, false);
+
 
         ClipboardService.copy(["/home/me/a.txt", "/home/me/b.txt"]);
         check("copy goes to the daemon", sent[0].method, "clipboard.copy");

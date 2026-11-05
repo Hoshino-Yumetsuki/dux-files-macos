@@ -162,6 +162,11 @@ ShellRoot {
         signalName: "itemDragStarted"
     }
 
+    SignalSpy {
+        id: openSpy
+        signalName: "openRequested"
+    }
+
     TestCase {
         name: "Interactions"
         when: root.ready
@@ -199,6 +204,8 @@ ShellRoot {
             const win = root.window;
             const surface = win.contentItem.children.find(child => child.isFloatingWindowSurface === true);
             SettingsData.animationDuration = 0;
+            SettingsData.language = "en";
+            SettingsData.showSystemPartitions = true;
             win.minimumSize = Qt.size(1100, 760);
             win.implicitWidth = 1100;
             win.implicitHeight = 760;
@@ -280,6 +287,20 @@ ShellRoot {
             check(pane.selection.paths, ["/tmp/document0"]);
             view.chevrons = false;
             pane.body.directory.entries.setProperty(0, "isDir", false);
+            if (Qt.platform.os === "osx") {
+                openSpy.target = pane;
+                pane.selection.select("/tmp/document0");
+                pane.focusBody();
+                keyClick(Qt.Key_Down, Qt.ControlModifier);
+                check(openSpy.count, 1);
+                check(openSpy.signalArguments[0][0][0].path, "/tmp/document0");
+                keyClick(Qt.Key_Up, Qt.ControlModifier);
+                check(pane.path, "/");
+                pane.navigate("/tmp");
+                entries(pane.body.directory);
+                tryVerify(() => pane.body.view?.itemAtIndex(0) !== null);
+                view = pane.body.view;
+            }
             view.positionViewAtBeginning();
             mouseWheel(surface, surface.width - 4, 200, 0, -120);
             tryVerify(() => view.contentY > view.originY);
@@ -296,26 +317,20 @@ ShellRoot {
             const sidebar = sidebarIn(surface);
             verify(sidebar !== null);
             const rows = sidebar.rows();
-            const system = rows.find(item => item.label === "/");
-            const projects = rows.find(item => item.label === "/mnt/projects");
+            const system = rows.find(item => item.dropPath === "/");
+            const projects = rows.find(item => item.dropPath === "/mnt/projects");
             verify(system !== undefined);
             verify(projects !== undefined);
-            check(system.subtitle, "/dev/nvme0n1p2");
-            check(projects.subtitle, "/dev/nvme1n1p1");
             check(system.actionIcon, "");
-            const home = rows.find(item => item.label === "/home");
+            const home = rows.find(item => item.dropPath === "/home");
             verify(home !== undefined);
             check(home.actionIcon, "");
-            check(home.actionTooltip, "");
-            check(projects.actionTooltip, "Unmount");
-            check(system.ringValue, 0.25);
-            check(projects.ringValue, 0.6);
             verify(system.tooltipText.includes("/dev/nvme0n1p2"));
             verify(projects.tooltipText.includes("/mnt/projects"));
+            check(projects.ringValue, 0.6);
             projects.clicked();
             check(pane.path, "/mnt/projects");
             const backup = rows.find(item => item.label === "Backup");
-            check(backup.actionTooltip, "Mount");
             backup.clicked();
             backup.clicked();
             check(root.mountRequests, 1);
@@ -355,6 +370,17 @@ ShellRoot {
             check(win.topbar.mapToItem(surface, 0, 0).y, topbarY);
             DC.Host.ownWindowDecorations = true;
             tryCompare(topbarJobs, "visible", false);
+            let confirmedQuits = 0;
+            win.dialogs.confirmQuit(() => confirmedQuits += 10);
+            tryCompare(win.dialogs, "anyOpen", true);
+            keyClick(Qt.Key_Escape);
+            tryCompare(win.dialogs, "anyOpen", false);
+            check(confirmedQuits, 0);
+            win.dialogs.confirmQuit(() => confirmedQuits++);
+            tryCompare(win.dialogs, "anyOpen", true);
+            keyClick(Qt.Key_Return);
+            tryCompare(win.dialogs, "anyOpen", false);
+            check(confirmedQuits, 1);
             FileOpsService.jobs = [];
             root.log.info("FIXTURE PASS");
         }

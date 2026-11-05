@@ -33,7 +33,7 @@ func searchServices(bus *ipc.EventBus) (ipc.Deps, func()) {
 		log.Debugf("udisks2 unavailable: %v", err)
 	}
 	searchService := search.NewService(bus, fileService)
-	searchService.SetIndexEnabled(!sandbox.Current().Sandboxed)
+	searchService.SetIndexEnabled(sandbox.Current().Features["indexSearch"].Available)
 	searchService.SetMounts(func() []string { return localMounts(deviceService.Snapshot()) })
 	searchService.SetExcludes(func() []string { return settings.Load(configHome()).SearchExcludes })
 	return ipc.Deps{Files: fileService, Search: searchService}, func() {

@@ -106,6 +106,10 @@ func loadMimeinfoCaches() map[string][]string {
 }
 
 func (s *Service) Default(mimeType string) string {
+	if s.native {
+		result, _ := s.nativeApps([]string{mimeType}, false)
+		return result.Defaults[mimeType]
+	}
 	candidates := s.Associations(mimeType)
 	if len(candidates) == 0 {
 		return ""
@@ -123,6 +127,10 @@ func removedBefore(files []assocFile, mimeType, id string) bool {
 }
 
 func (s *Service) Associations(mimeType string) []*Entry {
+	if s.native {
+		result, _ := s.nativeApps([]string{mimeType}, false)
+		return result.Associations[mimeType]
+	}
 	files := loadAssocFiles()
 	cache := loadMimeinfoCaches()
 
@@ -177,6 +185,9 @@ func claimsMime(entry *Entry, mimeType string, db *DB) bool {
 var writeMu sync.Mutex
 
 func (s *Service) SetDefault(mimeType, desktopID string) error {
+	if s.native {
+		return s.setNativeDefault(mimeType, desktopID)
+	}
 	if !safeIniField(mimeType) || !safeIniField(desktopID) {
 		return fmt.Errorf("invalid mime type or desktop id")
 	}

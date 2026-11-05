@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"net"
+	"runtime"
 	"testing"
 
 	"github.com/duxlabs-dev/dux-go/ipc"
@@ -55,7 +56,11 @@ func TestHandleMountsExplainsAMissingGvfs(t *testing.T) {
 
 	result := out["result"].(map[string]any)
 	assert.Equal(t, false, result["available"])
-	assert.Equal(t, "gvfs is not running", result["reason"])
+	reason := "gvfs is not running"
+	if runtime.GOOS != "linux" {
+		reason = "gvfs is unavailable on this platform"
+	}
+	assert.Equal(t, reason, result["reason"])
 	assert.Equal(t, []any{}, result["schemes"])
 }
 

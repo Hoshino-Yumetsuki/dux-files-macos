@@ -132,8 +132,9 @@ type View struct {
 }
 
 type pair struct {
-	src, dst string
-	dir      bool
+	src, dst      string
+	dir           bool
+	trashIdentity string
 }
 
 type Created struct {

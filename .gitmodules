@@ -1,4 +1,4 @@
 [submodule "dank-qml-common"]
 	path = dux-qml-common
-	url = https://github.com/duxlabs-dev/dux-qml-common.git
-	branch = master
+	url = https://github.com/Hoshino-Yumetsuki/dux-qml-common.git
+	branch = macos-port

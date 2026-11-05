@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"syscall"
 
@@ -39,17 +40,18 @@ var daemonCmd = &cobra.Command{
 }
 
 type daemonServices struct {
-	ipc       *ipc.Server
-	ipcErrCh  <-chan error
-	files     *files.Service
-	devices   *devices.Service
-	network   *netmount.Service
-	clipboard *clipboard.Service
-	search    *search.Service
-	bookmarks *bookmarks.Store
-	fm1       *filemanager1.Service
-	chooser   *filechooser.Service
-	colors    *colorscheme.Watcher
+	cancelNative context.CancelFunc
+	ipc          *ipc.Server
+	ipcErrCh     <-chan error
+	files        *files.Service
+	devices      *devices.Service
+	network      *netmount.Service
+	clipboard    *clipboard.Service
+	search       *search.Service
+	bookmarks    *bookmarks.Store
+	fm1          *filemanager1.Service
+	chooser      *filechooser.Service
+	colors       *colorscheme.Watcher
 }
 
 func (s *daemonServices) SocketPath() string {
@@ -62,6 +64,9 @@ func (s *daemonServices) SocketPath() string {
 func (s *daemonServices) Done() <-chan error { return s.ipcErrCh }
 
 func (s *daemonServices) Close() {
+	if s.cancelNative != nil {
+		s.cancelNative()
+	}
 	if s.ipc != nil {
 		s.ipc.Close()
 	}
@@ -105,7 +110,10 @@ func bootDaemonServices(ctx context.Context, ownsWindow bool) (*daemonServices, 
 	pending := &ipc.PendingOpen{}
 	var chooser *filechooser.Service
 	var portalController *portal.Controller
-	if ownsWindow {
+	if runtime.GOOS != "linux" {
+		portalController = portal.Unavailable("NOTSUPPORTED")
+	}
+	if ownsWindow && runtime.GOOS == "linux" {
 		chooser, portalController = startPortalChooser(ipc.Deps{Bus: bus, Pending: pending}, caps)
 	}
 
@@ -115,21 +123,25 @@ func bootDaemonServices(ctx context.Context, ownsWindow bool) (*daemonServices, 
 	opsManager.SetElevator(elevate.NewClient())
 
 	deviceService := devices.NewService(bus, uint32(os.Getuid()))
-	if err := deviceService.Start(); err != nil {
-		log.Warnf("udisks2 unavailable: %v", err)
+	if runtime.GOOS == "linux" || caps.Features["devices"].Available {
+		if err := deviceService.Start(); err != nil {
+			log.Warnf("device service unavailable: %v", err)
+		}
 	}
 
 	config := configHome()
 	recentStore := wireRecent(appService, chooser, config)
 	networkService := netmount.NewService(bus, config)
-	if err := networkService.Start(); err != nil {
-		log.Warnf("gvfs unavailable: %v", err)
+	if caps.Gvfs || caps.Features["network"].Available {
+		if err := networkService.Start(); err != nil {
+			log.Warnf("network mount service unavailable: %v", err)
+		}
 	}
 
 	clipboardService := clipboard.NewService()
 	opsManager.SetImageSource(clipboardService)
 	searchService := search.NewService(bus, fileService)
-	searchService.SetIndexEnabled(!caps.Sandboxed)
+	searchService.SetIndexEnabled(caps.Features["indexSearch"].Available)
 	searchService.SetMounts(func() []string { return localMounts(deviceService.Snapshot()) })
 	searchService.SetExcludes(func() []string { return settings.Load(config).SearchExcludes })
 	bookmarkStore := bookmarks.New(bus, config, filepath.Join(filepath.Dir(config), "gtk-3.0", "bookmarks"))
@@ -138,11 +150,17 @@ func bootDaemonServices(ctx context.Context, ownsWindow bool) (*daemonServices, 
 		bookmarkStore = nil
 	}
 
-	colorSchemeWatcher := colorscheme.New(bus.Publish)
-	if err := colorSchemeWatcher.Start(); err != nil {
-		log.Warnf("color-scheme portal watcher unavailable: %v", err)
+	var colorSchemeWatcher *colorscheme.Watcher
+	if runtime.GOOS == "linux" {
+		colorSchemeWatcher = colorscheme.New(bus.Publish)
+		if err := colorSchemeWatcher.Start(); err != nil {
+			log.Warnf("color-scheme portal watcher unavailable: %v", err)
+		}
 	}
 
+	if runtime.GOOS == "darwin" {
+		colorSchemeWatcher = colorscheme.New(bus.Publish)
+	}
 	deps := ipc.Deps{
 		Bus:         bus,
 		Pending:     pending,
@@ -164,14 +182,22 @@ func bootDaemonServices(ctx context.Context, ownsWindow bool) (*daemonServices, 
 	}
 
 	var fm1 *filemanager1.Service
-	if ownsWindow {
+	if ownsWindow && runtime.GOOS == "linux" {
 		fm1 = startFileManager1(deps, dbusActivated || settings.Load(config).RegisterFileManager)
+	}
+	if ownsWindow && runtime.GOOS == "darwin" {
+		var err error
+		fm1, err = filemanager1.NewNative()
+		if err != nil {
+			log.Warnf("native folder handler unavailable: %v", err)
+		}
 	}
 	if fm1 != nil {
 		deps.FileManager = fm1
 	}
 
 	svc := &daemonServices{files: fileService, devices: deviceService, network: networkService, clipboard: clipboardService, search: searchService, bookmarks: bookmarkStore, fm1: fm1, chooser: chooser, colors: colorSchemeWatcher}
+	svc.cancelNative = watchNativeServices(ctx, deviceService, networkService, colorSchemeWatcher)
 	ipcSrv, ipcErrCh, err := startIPC(ctx, deps)
 	if err != nil {
 		svc.Close()
@@ -270,10 +296,18 @@ func cacheHome() string {
 }
 
 func runDaemon(_ *cobra.Command, _ []string) error {
+	cleanup, err := trackNativeUI()
+	if err != nil {
+		return err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	nativeStdinDone := watchNativeUIStdin(cleanup != nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc, err := bootDaemonServices(ctx, false)
+	svc, err := bootDaemonServices(ctx, cleanup != nil)
 	if err != nil {
 		return err
 	}
@@ -287,6 +321,8 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	select {
 	case sig := <-signalCh:
 		log.Infof("received %s, shutting down", sig)
+	case <-nativeStdinDone:
+		log.Infof("native UI stdin closed, shutting down")
 	case err := <-svc.Done():
 		if err != nil {
 			return fmt.Errorf("ipc server: %w", err)

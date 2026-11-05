@@ -2,6 +2,7 @@ package mimeapps
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,14 +25,25 @@ type Sections struct {
 }
 
 func (s *Service) RecentFor(mimeType string) []*Entry {
+	return s.recentFor(mimeType, s.EntryByID)
+}
+
+func (s *Service) recentFor(mimeType string, lookup func(string) *Entry) []*Entry {
 	groups := readGroups(writePath())
 	if groups[groupAdded] == nil {
 		return nil
 	}
 	var out []*Entry
 	for _, id := range splitList(groups[groupAdded].value(s.detector.db.Canonical(mimeType))) {
-		entry := s.entries.byIdentifier(id)
-		if !entry.Launchable() || containsID(out, id) {
+		if s.native {
+			var err error
+			id, err = url.QueryUnescape(id)
+			if err != nil {
+				continue
+			}
+		}
+		entry := lookup(id)
+		if entry == nil || (!s.native && !entry.Launchable()) || containsID(out, id) {
 			continue
 		}
 		out = append(out, entry)
@@ -40,10 +52,15 @@ func (s *Service) RecentFor(mimeType string) []*Entry {
 }
 
 func (s *Service) RecordUse(mimeType, desktopID string) error {
-	if !safeIniField(mimeType) || !safeIniField(desktopID) {
+	storedID := desktopID
+	if s.native {
+		storedID = url.QueryEscape(desktopID)
+	}
+	if !safeIniField(mimeType) || !safeIniField(storedID) || strings.ContainsRune(desktopID, 0) {
 		return fmt.Errorf("invalid mime type or desktop id")
 	}
-	if !s.entries.byIdentifier(desktopID).Launchable() {
+	entry := s.EntryByID(desktopID)
+	if entry == nil || (!s.native && !entry.Launchable()) {
 		return fmt.Errorf("desktop entry %q is not launchable", desktopID)
 	}
 
@@ -53,7 +70,7 @@ func (s *Service) RecordUse(mimeType, desktopID string) error {
 	path := writePath()
 	original, _ := os.ReadFile(path)
 	canonical := s.detector.db.Canonical(mimeType)
-	updated := setGroupLine(original, groupAdded, canonical, addedLine(original, canonical, desktopID))
+	updated := setGroupLine(original, groupAdded, canonical, addedLine(original, canonical, storedID))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -88,7 +105,7 @@ func (s *Service) RecordUseForPaths(paths []string, desktopID string) error {
 	return nil
 }
 
-func (s *Service) Sections(mimeTypes []string) Sections {
+func (s *Service) sectionTypes(mimeTypes []string) []string {
 	var types []string
 	for _, mimeType := range mimeTypes {
 		canonical := s.detector.db.Canonical(StripParams(mimeType))
@@ -96,6 +113,15 @@ func (s *Service) Sections(mimeTypes []string) Sections {
 			types = append(types, canonical)
 		}
 	}
+	return types
+}
+
+func (s *Service) Sections(mimeTypes []string) Sections {
+	if s.native {
+		out, _ := s.nativeSections(mimeTypes)
+		return out
+	}
+	types := s.sectionTypes(mimeTypes)
 	out := Sections{MimeTypes: types}
 	if len(types) == 0 {
 		return out

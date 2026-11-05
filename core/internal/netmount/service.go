@@ -1,6 +1,8 @@
 package netmount
 
 import (
+	"context"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +24,10 @@ type Publisher interface {
 }
 
 type Service struct {
+	native   func(context.Context, string, any, any) error
+	nativeMu sync.Mutex
+	schemes  []string
+
 	bus       Publisher
 	servers   *serverStore
 	opCounter atomic.Uint32
@@ -47,17 +53,28 @@ type Snapshot struct {
 }
 
 func NewService(bus Publisher, configDir string) *Service {
+	reason := "gvfs is not running"
+	if runtime.GOOS != "linux" {
+		reason = "gvfs is unavailable on this platform"
+	}
 	return &Service{
 		bus:     bus,
 		servers: newServerStore(configDir),
 		stop:    make(chan struct{}),
-		reason:  "gvfs is not running",
+		reason:  reason,
 		ops:     map[dbus.ObjectPath]*mountOp{},
 		listers: map[dbus.ObjectPath]*enumerator{},
 	}
 }
 
 func (s *Service) Start() error {
+	if runtime.GOOS == "darwin" {
+		return s.startNative()
+	}
+	if runtime.GOOS != "linux" {
+		s.setReason("gvfs is unavailable on this platform")
+		return nil
+	}
 	conn, err := dbus.ConnectSessionBus(dbus.WithIncomingInterceptor(s.intercept))
 	if err != nil {
 		s.setReason("the session bus is unavailable")
@@ -148,7 +165,11 @@ func (s *Service) reload(conn *dbus.Conn) {
 func (s *Service) Snapshot() Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return Snapshot{Kind: "mounts", Available: s.available, Reason: s.reason, Schemes: availableSchemes(s.mountables), Mounts: s.mounts}
+	schemes := availableSchemes(s.mountables)
+	if s.native != nil {
+		schemes = append([]string{}, s.schemes...)
+	}
+	return Snapshot{Kind: "mounts", Available: s.available, Reason: s.reason, Schemes: schemes, Mounts: append([]Mount{}, s.mounts...)}
 }
 
 type Connected struct {
@@ -159,6 +180,9 @@ type Connected struct {
 }
 
 func (s *Service) Connect(uri, password string) (Connected, error) {
+	if s.native != nil {
+		return s.connectNative(uri, password)
+	}
 	conn := s.connection()
 	if conn == nil {
 		return Connected{}, fail(files.CodeNotSupported, "gvfs is not running")
@@ -243,6 +267,9 @@ func (s *Service) remember(server Server) {
 }
 
 func (s *Service) Disconnect(id string) error {
+	if s.native != nil {
+		return s.disconnectNative(id)
+	}
 	conn := s.connection()
 	if conn == nil {
 		return fail(files.CodeNotSupported, "gvfs is not running")

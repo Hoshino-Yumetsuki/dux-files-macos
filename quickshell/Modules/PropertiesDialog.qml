@@ -177,6 +177,7 @@ OverlayDialog {
                     thumbnail: root.primary?.thumbnail ?? ""
                     path: root.primary?.path ?? ""
                     mime: root.primary?.mime ?? ""
+                    dataless: root.primary?.dataless ?? false
                     isDir: root.primary?.isDir ?? false
                     isSymlink: root.primary?.isSymlink ?? false
                     symlinkBroken: root.primary?.symlinkBroken ?? false

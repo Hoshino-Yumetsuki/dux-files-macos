@@ -122,6 +122,13 @@ ShellRoot {
         name: "PdfPreview"
         when: fixture.ready
 
+        function test_missing_image_error() {
+            const view = fixture.view;
+            view.present({"path": "/nonexistent/photo.png", "name": "photo.png", "mime": "image/png"});
+            compare(view.open, true);
+            tryCompare(view, "errorMessage", "This file could not be opened");
+        }
+
         function test_optional_pdf() {
             const view = fixture.view;
             view.present({

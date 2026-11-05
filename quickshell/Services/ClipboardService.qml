@@ -15,6 +15,7 @@ Singleton {
     property bool available: true
 
     readonly property bool hasFiles: paths.length > 0
+    readonly property bool hasPaste: hasFiles || (Qt.platform.os === "osx" && NativePlatform.hasClipboardImage)
 
     signal requestFailed(string message)
 
@@ -27,6 +28,10 @@ Singleton {
     }
 
     function read(callback) {
+        if (Qt.platform.os === "osx") {
+            callback(Quickshell.readFiles());
+            return;
+        }
         transport.sendRequest("clipboard.paths", null, response => {
             if (response.error) {
                 root.requestFailed(response.error);
@@ -46,6 +51,12 @@ Singleton {
     }
 
     function refresh() {
+        if (Qt.platform.os === "osx") {
+            const result = Quickshell.readFiles();
+            paths = result.paths;
+            cut = result.cut;
+            return;
+        }
         if (paths.length === 0)
             return;
         transport.sendRequest("clipboard.paths", null, response => {
@@ -59,12 +70,22 @@ Singleton {
     function clear() {
         paths = [];
         cut = false;
+        if (Qt.platform.os === "osx") {
+            Quickshell.clearFiles();
+            return;
+        }
         transport.sendRequest("clipboard.clear", null, null);
     }
 
     function _publish(selection, asCut) {
         if (selection.length === 0)
             return;
+        if (Qt.platform.os === "osx") {
+            available = Quickshell.copyFiles(selection, asCut);
+            if (available)
+                refresh();
+            return;
+        }
         transport.sendRequest("clipboard.copy", {
             "paths": selection,
             "cut": asCut
@@ -78,5 +99,18 @@ Singleton {
             root.paths = selection.slice();
             root.cut = asCut;
         });
+    }
+
+    Component.onCompleted: {
+        if (Qt.platform.os === "osx")
+            refresh();
+    }
+
+    Connections {
+        target: Qt.platform.os === "osx" ? Quickshell : null
+
+        function onClipboardTextChanged() {
+            root.refresh();
+        }
     }
 }

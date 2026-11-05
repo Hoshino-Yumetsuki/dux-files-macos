@@ -244,7 +244,7 @@ func TestCancelMidCopyLeavesNoTempFile(t *testing.T) {
 	require.True(t, os.IsNotExist(err))
 }
 
-func TestCancelledCrossDeviceMoveReportsTheSplit(t *testing.T) {
+func TestCancelledCrossDeviceMoveRetainsSourceTree(t *testing.T) {
 	previous := copyChunk
 	copyChunk = 1
 	t.Cleanup(func() { copyChunk = previous })
@@ -264,8 +264,7 @@ func TestCancelledCrossDeviceMoveReportsTheSplit(t *testing.T) {
 
 	require.True(t, view.Cancelled)
 	require.Equal(t, "a", read(t, filepath.Join(dest, "src", "a.txt")))
-	_, err := os.Lstat(filepath.Join(src, "a.txt"))
-	require.True(t, os.IsNotExist(err), "moved file stays moved")
+	require.Equal(t, "a", read(t, filepath.Join(src, "a.txt")), "completed copies do not remove sources before the tree is finalized")
 	require.FileExists(t, filepath.Join(src, "b.bin"), "unfinished file stays at the source")
 	require.Empty(t, tempsIn(t, filepath.Join(dest, "src")))
 }

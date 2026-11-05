@@ -13,7 +13,10 @@ func (s *Service) Handle(w *ipc.ConnWriter, req ipc.Request) {
 	case "clipboard.paths":
 		s.handlePaths(w, req)
 	case "clipboard.clear":
-		s.Clear()
+		if err := s.Clear(); err != nil {
+			w.RespondError(req.ID, err.Error())
+			return
+		}
 		w.Respond(req.ID, map[string]any{"cleared": true})
 	default:
 		w.RespondError(req.ID, "unknown clipboard method: "+req.Method)

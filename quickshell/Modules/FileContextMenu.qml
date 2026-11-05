@@ -11,6 +11,7 @@ FileMenu {
     property int selectionCount: 0
     property bool hasDirectory: false
     property bool hasClipboard: false
+    property bool hasClipboardFiles: hasClipboard
     property bool shiftHeld: false
     property bool forFolder: false
     property bool forPicker: false
@@ -398,7 +399,7 @@ FileMenu {
             "id": "pasteLink",
             "icon": "add_link",
             "label": I18n.tr("Paste as link", "context menu entry creating symlinks from the clipboard"),
-            "enabled": hasClipboard
+            "enabled": hasClipboardFiles
         },
         {
             "id": "separator"

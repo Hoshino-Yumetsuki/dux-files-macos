@@ -46,6 +46,7 @@ Item {
         dragGhost.thumbnail = entry?.thumbnail ?? "";
         dragGhost.mime = entry?.mime ?? "";
         dragGhost.path = entry?.path ?? "";
+        dragGhost.dataless = entry?.dataless ?? false;
         dragGhost.isDir = entry?.isDir ?? false;
         dragSource.Drag.mimeData = DragService.mimeData();
         dragGhost.grabToImage(result => {

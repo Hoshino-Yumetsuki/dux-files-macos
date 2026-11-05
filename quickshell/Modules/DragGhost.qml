@@ -13,6 +13,7 @@ Rectangle {
     property string thumbnail: ""
     property string mime: ""
     property string path: ""
+    property bool dataless: false
     property bool isDir: false
 
     implicitWidth: body.implicitWidth + Theme.spacingS * 2
@@ -35,7 +36,7 @@ Rectangle {
             FileIcon {
                 anchors.fill: parent
                 iconName: ghost.iconName
-                thumbnail: ghost.thumbnail !== "" ? ghost.thumbnail : ghost.mime === "image/svg+xml" ? ghost.path : ""
+                thumbnail: ghost.thumbnail !== "" ? ghost.thumbnail : ghost.mime === "image/svg+xml" && FilePaths.localContent(ghost.path, ghost.dataless) ? ghost.path : ""
                 size: FilesMetrics.dragGhostSize
                 color: ghost.isDir ? Theme.primary : Theme.surfaceText
                 asynchronous: false

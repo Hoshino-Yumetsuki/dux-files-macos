@@ -16,7 +16,8 @@ import (
 func fixture(t *testing.T) (*Service, string) {
 	t.Helper()
 
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	copyTree(t, "testdata", root)
 	writeMagic(t, filepath.Join(root, "mime", "magic"))
 

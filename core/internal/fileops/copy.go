@@ -20,6 +20,10 @@ type outcome struct {
 	undoable bool
 	dir      bool
 }
+type pendingRemoval struct {
+	path string
+	info os.FileInfo
+}
 
 func (r *runner) transferAll(move bool) error {
 	return r.transferPairs(r.targets(), move)
@@ -49,7 +53,7 @@ func (r *runner) transferPairs(pairs []pair, move bool) error {
 		if !r.guarded(p.src) {
 			return errors.New("changed since the operation it would replay: " + p.src)
 		}
-		done, err := r.transfer(p.src, p.dst, move)
+		done, err := r.coordinatedTransfer(p.src, p.dst, move)
 		switch {
 		case errors.Is(err, errSkipped):
 			continue
@@ -74,6 +78,9 @@ func (r *runner) transfer(src, dst string, move bool) (outcome, error) {
 		info, statErr = fs.Lstat(src)
 		return statErr
 	}); err != nil {
+		if r.pending != nil {
+			r.pendingInvalid = true
+		}
 		return outcome{}, err
 	}
 
@@ -87,24 +94,74 @@ func (r *runner) transfer(src, dst string, move bool) (outcome, error) {
 	dst = res.dst
 
 	undoable := !res.merge && !res.replaced
-	if move && !res.merge && r.renameInto(src, dst, info) {
+	if move && r.pending == nil && !res.merge && r.renameInto(src, dst, info) {
 		return outcome{dst: dst, undoable: undoable, dir: info.IsDir()}, nil
 	}
 	if err := r.clearTarget(dst, res, info.IsDir()); err != nil {
+		if r.pending != nil {
+			r.pendingInvalid = true
+		}
 		return outcome{}, err
 	}
-
+	rootMove := move && info.IsDir() && r.pending == nil
+	if rootMove {
+		pending := []pendingRemoval{}
+		r.pending = &pending
+		r.pendingInvalid = false
+		defer func() { r.pending = nil }()
+	}
+	deferDelete := move && r.pending != nil
+	var err error
 	switch {
 	case info.IsDir():
-		return outcome{dst: dst, undoable: undoable, dir: true}, r.transferDir(src, dst, move, res.merge)
+		err = r.transferDir(src, dst, move, res.merge)
 	case info.Mode()&fs.ModeSymlink != 0:
-		return outcome{dst: dst, undoable: undoable}, r.transferLink(src, dst, move, !res.replaced)
+		err = r.transferLink(src, dst, move && !deferDelete, !res.replaced)
 	case info.Mode().IsRegular():
-		return outcome{dst: dst, undoable: undoable}, r.transferFile(src, dst, info, move, !res.replaced)
+		err = r.transferFile(src, dst, info, move && !deferDelete, !res.replaced)
 	default:
 		r.skip()
 		return outcome{}, errSkipped
 	}
+	if err != nil {
+		if deferDelete {
+			r.pendingInvalid = true
+		}
+		return outcome{}, err
+	}
+	if deferDelete {
+		*r.pending = append(*r.pending, pendingRemoval{path: src, info: info})
+	}
+	if rootMove {
+		if r.pendingInvalid {
+			return outcome{dst: dst, dir: true}, nil
+		}
+		for _, item := range *r.pending {
+			current, statErr := os.Lstat(item.path)
+			if statErr != nil || !os.SameFile(item.info, current) || (!item.info.IsDir() && (item.info.Size() != current.Size() || !item.info.ModTime().Equal(current.ModTime()))) {
+				return outcome{}, errors.New("source changed during move: " + item.path)
+			}
+		}
+		for _, item := range *r.pending {
+			if r.job.closed() {
+				return outcome{}, context.Canceled
+			}
+			if item.info.IsDir() {
+				var entries []os.DirEntry
+				if err := r.retry(item.path, func(fs FS) error { var err error; entries, err = fs.ReadDir(item.path); return err }); err != nil {
+					return outcome{}, err
+				}
+				if len(entries) != 0 {
+					undoable = false
+					continue
+				}
+			}
+			if err := r.retry(item.path, func(fs FS) error { return fs.Remove(item.path) }); err != nil {
+				return outcome{}, err
+			}
+		}
+	}
+	return outcome{dst: dst, undoable: undoable, dir: info.IsDir()}, nil
 }
 
 func (r *runner) renameInto(src, dst string, info os.FileInfo) bool {
@@ -177,11 +234,9 @@ func (r *runner) transferDir(src, dst string, move, merge bool) error {
 	}
 
 	var children []os.DirEntry
-	srcFS := local
 	if err := r.retry(src, func(fs FS) error {
 		var readErr error
 		children, readErr = fs.ReadDir(src)
-		srcFS = fs
 		return readErr
 	}); err != nil {
 		return err
@@ -203,14 +258,10 @@ func (r *runner) transferDir(src, dst string, move, merge bool) error {
 		}
 	}
 
-	r.preserve(src, dst, info, dstFS)
+	if err := r.retryLocal(dst, func() error { return r.preserve(src, dst, info, dstFS) }); err != nil {
+		return err
+	}
 	r.advance(dst, 1, 0)
-	if !move {
-		return nil
-	}
-	if err := srcFS.Remove(src); err != nil {
-		r.warn(src, err)
-	}
 	return nil
 }
 
@@ -236,6 +287,15 @@ func (r *runner) transferLink(src, dst string, move, noReplace bool) error {
 	}); err != nil {
 		return err
 	}
+	info, err := os.Lstat(src)
+	if err != nil {
+		made.discard()
+		return err
+	}
+	if err := r.retryLocal(dst, func() error { return r.preserve(src, tmp, info, made.fs) }); err != nil {
+		made.discard()
+		return err
+	}
 	if err := r.commit(tmp, dst, made, noReplace); err != nil {
 		return err
 	}
@@ -255,7 +315,10 @@ func (r *runner) transferFile(src, dst string, info os.FileInfo, move, noReplace
 		return err
 	}
 
-	r.preserve(src, tmp, info, made.fs)
+	if err := r.retryLocal(dst, func() error { return r.preserve(src, tmp, info, made.fs) }); err != nil {
+		made.discard()
+		return err
+	}
 	if err := r.commit(tmp, dst, made, noReplace); err != nil {
 		return err
 	}
@@ -281,14 +344,31 @@ func (r *runner) dropSource(src string, move bool) error {
 
 func (r *runner) copyBytes(src, tmp string, info os.FileInfo, made *creation) error {
 	var in io.ReadCloser
+	srcFS := local
 	if err := r.retry(src, func(fs FS) error {
 		opened, err := fs.Open(src)
 		in = opened
+		srcFS = fs
 		return err
 	}); err != nil {
 		return err
 	}
 	defer in.Close()
+	if _, ok := srcFS.(localFS); ok {
+		cloned, err := cloneFile(src, tmp)
+		if err != nil {
+			return err
+		}
+		if cloned {
+			made.fs = local
+			if r.job.closed() {
+				made.discard()
+				return context.Canceled
+			}
+			r.advance(src, 0, info.Size())
+			return nil
+		}
+	}
 
 	var out Writer
 	if err := r.retry(tmp, func(fs FS) error {
@@ -331,22 +411,16 @@ func (r *runner) copyBytes(src, tmp string, info os.FileInfo, made *creation) er
 	}
 }
 
-func (r *runner) preserve(src, dst string, info os.FileInfo, through FS) {
+func (r *runner) preserve(src, dst string, info os.FileInfo, through FS) error {
 	if through == nil {
 		through = local
 	}
-	if err := through.Chmod(dst, info.Mode().Perm(), false); err != nil {
+	err := preserveMetadata(r.job.ctx, src, dst, info, through)
+	if err != nil && !metadataStrict {
 		r.warn(dst, err)
+		return nil
 	}
-	if err := through.Chtimes(dst, info.ModTime()); err != nil {
-		r.warn(dst, err)
-	}
-	if through != local {
-		return
-	}
-	if err := copyXattrs(src, dst); err != nil {
-		r.warn(dst, err)
-	}
+	return err
 }
 
 func (r *runner) growTotals(children int) {

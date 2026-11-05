@@ -58,6 +58,15 @@ func (s *Service) Handle(ctx context.Context, w *ipc.ConnWriter, req ipc.Request
 	case "files.apps.sections":
 		s.handleSections(w, req)
 	case "files.apps.all":
+		if s.native {
+			catalog, err := s.nativeApps(nil, true)
+			if err != nil {
+				wire.RespondError(w, req.ID, err)
+				return
+			}
+			w.Respond(req.ID, appsResult{Apps: viewsOf(catalog.Apps, "")})
+			return
+		}
 		w.Respond(req.ID, appsResult{Apps: viewsOf(s.Apps(), "")})
 	case "files.apps.setDefault":
 		s.handleSetDefault(w, req)
@@ -137,6 +146,16 @@ func (s *Service) handleForMime(w *ipc.ConnWriter, req ipc.Request) {
 		return
 	}
 
+	if s.native {
+		catalog, err := s.nativeApps([]string{mimeType}, false)
+		if err != nil {
+			wire.RespondError(w, req.ID, err)
+			return
+		}
+		defaultID := catalog.Defaults[mimeType]
+		w.Respond(req.ID, appsResult{MimeType: mimeType, DefaultID: defaultID, Apps: viewsOf(catalog.Associations[mimeType], defaultID)})
+		return
+	}
 	defaultID := s.Default(mimeType)
 	w.Respond(req.ID, appsResult{
 		MimeType:  mimeType,
@@ -160,7 +179,17 @@ func (s *Service) handleSections(w *ipc.ConnWriter, req ipc.Request) {
 		return
 	}
 
-	sections := s.Sections(mimeTypes)
+	var sections Sections
+	if s.native {
+		var err error
+		sections, err = s.nativeSections(mimeTypes)
+		if err != nil {
+			wire.RespondError(w, req.ID, err)
+			return
+		}
+	} else {
+		sections = s.Sections(mimeTypes)
+	}
 	w.Respond(req.ID, sectionsResult{
 		MimeTypes:   sections.MimeTypes,
 		DefaultID:   sections.DefaultID,
@@ -183,6 +212,10 @@ func (s *Service) handleSetDefault(w *ipc.ConnWriter, req ipc.Request) {
 		return
 	}
 	if err := s.SetDefault(mimeType, desktopID); err != nil {
+		if s.native {
+			wire.RespondError(w, req.ID, err)
+			return
+		}
 		wire.RespondError(w, req.ID, &files.Error{Code: files.CodeAccess, Err: err})
 		return
 	}

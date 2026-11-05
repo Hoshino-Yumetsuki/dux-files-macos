@@ -3,6 +3,7 @@ package portal
 import (
 	"errors"
 	"os"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -87,10 +88,16 @@ func (c *Controller) Pending() []filechooser.Request {
 }
 
 func (c *Controller) Status() Report {
+	if runtime.GOOS != "linux" {
+		return Report{Reason: "NOTSUPPORTED", Backend: filechooser.Status{Reason: "NOTSUPPORTED"}}
+	}
 	return c.report(portalsetup.Inspect(c.Env()))
 }
 
 func (c *Controller) Install() (Report, error) {
+	if runtime.GOOS != "linux" {
+		return c.Status(), errors.New("desktop portals are unavailable on this platform")
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.unavailable != "" {
@@ -124,6 +131,9 @@ func (c *Controller) reloadBus() {
 }
 
 func (c *Controller) Uninstall() (Report, error) {
+	if runtime.GOOS != "linux" {
+		return c.Status(), errors.New("desktop portals are unavailable on this platform")
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	status, err := portalsetup.Uninstall(c.Env())
@@ -136,6 +146,9 @@ func (c *Controller) Uninstall() (Report, error) {
 }
 
 func (c *Controller) Restart() error {
+	if runtime.GOOS != "linux" {
+		return errors.New("desktop portals are unavailable on this platform")
+	}
 	pid, _ := c.frontendPID()
 	return portalsetup.RestartFrontend(pid)
 }

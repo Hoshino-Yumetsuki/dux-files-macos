@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import qs.Common
 import qs.Services
 import qs.DCommon.Widgets
@@ -19,7 +20,7 @@ FocusScope {
     property real panY: 0
 
     readonly property string path: entry?.path ?? ""
-    readonly property string kind: open && entry ? PreviewView.kindFor(entry.mime) : ""
+    readonly property string kind: open && entry && !entry.dataless ? PreviewView.kindFor(entry.mime) : ""
     readonly property bool turned: PreviewView.normalizeAngle(angle) % 180 !== 0
     readonly property real devicePixelRatio: Window.window?.devicePixelRatio ?? Screen.devicePixelRatio
     readonly property int rasterBucket: Math.min(4, Math.max(1, Math.ceil(zoom)))
@@ -58,7 +59,7 @@ FocusScope {
     }
 
     function supports(target) {
-        return PreviewView.kindFor(target?.mime ?? "") !== "";
+        return target && FilePaths.localContent(target.path, target.dataless) && PreviewView.kindFor(target.mime ?? "") !== "";
     }
 
     function dismiss() {
@@ -208,7 +209,13 @@ FocusScope {
 
                 anchors.fill: parent
                 anchors.margins: Theme.spacingS
-                source: visible && overlay.path !== "" ? FilePaths.toFileUrl(overlay.path) : ""
+                source: {
+                    if (!visible || overlay.path === "")
+                        return "";
+                    if (Qt.platform.os === "osx" && overlay.entry?.mime !== "image/svg+xml")
+                        return NativePlatform.thumbnailUrl(overlay.path);
+                    return FilePaths.toFileUrl(overlay.path);
+                }
                 sourceSize.width: Math.max(1, Math.ceil(width * overlay.devicePixelRatio * overlay.rasterBucket))
                 sourceSize.height: Math.max(1, Math.ceil(height * overlay.devicePixelRatio * overlay.rasterBucket))
                 visible: overlay.kind === "image"

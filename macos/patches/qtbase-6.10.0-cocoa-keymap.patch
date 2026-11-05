@@ -1,0 +1,13 @@
+--- a/src/gui/platform/darwin/qapplekeymapper.mm
++++ b/src/gui/platform/darwin/qapplekeymapper.mm
+@@ -467,6 +467,9 @@
+             QChar cocoaUnicodeKey;
+             if (charactersWithModifiers.length > 0)
+                 cocoaUnicodeKey = QChar([charactersWithModifiers characterAtIndex:0]);
+-
++
++            if (carbonUnicodeKey.isNull() && !cocoaUnicodeKey.isNull())
++                carbonUnicodeKey = cocoaUnicodeKey;
++
+             if (cocoaUnicodeKey != carbonUnicodeKey) {
+                 qCWarning(lcQpaKeyMapper) << "Mismatch between Cocoa" << cocoaUnicodeKey

@@ -106,7 +106,8 @@ Item {
         clearRecentDialog.open();
     }
 
-    function confirmQuit() {
+    function confirmQuit(callback) {
+        quitDialog.pendingCallback = callback ?? null;
         quitDialog.running = FileOpsService.activeCount;
         quitDialog.open();
     }
@@ -366,11 +367,23 @@ Item {
         id: quitDialog
 
         property int running: 0
+        property var pendingCallback: null
 
         title: I18n.tr("Quit while file operations are running?", "confirmation header when closing the last window would stop running file operations")
         message: running === 1 ? I18n.tr("The running operation will be stopped part way through.", "quit confirmation explanation for a single running file operation") : I18n.tr("%1 running operations will be stopped part way through.", "quit confirmation explanation for several running file operations").arg(running)
         confirmText: I18n.tr("Quit", "close behavior button group option to quit the app")
-        onConfirmed: dialogs.mainWindow.closeRequested(true)
+        onConfirmed: {
+            const callback = pendingCallback;
+            pendingCallback = null;
+            if (callback)
+                callback();
+            else
+                dialogs.mainWindow.closeRequested(true);
+        }
+        onVisibleChanged: {
+            if (!visible)
+                pendingCallback = null;
+        }
     }
 
     ConfirmDialog {

@@ -16,7 +16,15 @@ import (
 
 const trashInfoExt = ".trashinfo"
 
-var listTrash = trash.List
+var (
+	listTrash    = trash.List
+	putTrash     = trash.Put
+	nativeTrash  = trash.Native
+	lookupTrash  = trash.Lookup
+	restoreTrash = trash.RestoreTo
+	forgetTrash  = trash.Forget
+	removeTrash  = trash.Remove
+)
 
 func (r *runner) trash() error {
 	sources := r.job.spec.sources
@@ -27,11 +35,14 @@ func (r *runner) trash() error {
 		if r.job.closed() {
 			return nil
 		}
+		if !r.guarded(path) {
+			return errors.New("changed since the operation it would replay: " + path)
+		}
 
 		var entry trash.Entry
 		err := r.retryLocal(path, func() error {
 			var putErr error
-			entry, putErr = trash.Put(path)
+			entry, putErr = putTrash(path)
 			return putErr
 		})
 		switch {
@@ -47,13 +58,16 @@ func (r *runner) trash() error {
 		if entry.IsDir && measured {
 			writeDirectorySize(entry, counted.bytes)
 		}
-		r.rememberPair(KindRestore, pair{src: entry.Name, dst: entry.TrashDir}, guard{})
+		r.rememberPair(KindRestore, pair{src: entry.Name, dst: entry.TrashDir, trashIdentity: entry.Identity}, guard{})
 		r.advance(path, max(counted.files, 1), counted.bytes)
 	}
 	return nil
 }
 
 func (r *runner) restore() error {
+	if nativeTrash() {
+		return r.restoreNative()
+	}
 	items := r.restoreItems()
 	r.setTotals(len(items), 0, false)
 
@@ -96,6 +110,78 @@ func (r *runner) restore() error {
 		if done.undoable {
 			r.rememberPair(KindTrash, pair{src: done.dst, dst: ""}, guard{})
 		}
+	}
+	return nil
+}
+
+func (r *runner) restoreNative() error {
+	items := r.restoreItems()
+	r.setTotals(len(items), 0, false)
+	for _, item := range items {
+		if r.job.closed() {
+			return nil
+		}
+		var target string
+		err := r.retryLocal(item.src, func() error {
+			entry, err := lookupTrash(item.src, item.dst)
+			if err != nil {
+				return err
+			}
+			if item.trashIdentity != "" && entry.Identity != item.trashIdentity {
+				return errors.New("trash item has changed since the operation it would replay")
+			}
+			if !filepath.IsAbs(entry.OriginalPath) {
+				return errors.New("original location is unavailable; move this item to a chosen folder")
+			}
+			target = entry.OriginalPath
+			for {
+				if r.job.closed() {
+					return context.Canceled
+				}
+				_, err := os.Lstat(target)
+				switch {
+				case err == nil:
+					action := r.conflictAll
+					if action == "" {
+						conflict := &Conflict{
+							ID: r.job.nextID("c"), Source: r.describe(entry.FilesPath), Target: r.describe(target),
+							Actions: []Action{ActionSkip, ActionKeepBoth, ActionCancel},
+						}
+						answer := r.job.ask(event{Kind: "conflict", JobID: r.job.id, Conflict: conflict}, StatePausedConflict)
+						action = answer.Action
+						if answer.ApplyToAll {
+							r.conflictAll = action
+						}
+					}
+					switch action {
+					case ActionKeepBoth:
+						target = uniquePath(entry.OriginalPath)
+					case ActionSkip:
+						r.skip()
+						return errSkipped
+					default:
+						return context.Canceled
+					}
+				case !errors.Is(err, os.ErrNotExist):
+					return err
+				}
+				err = restoreTrash(entry, target)
+				if errors.Is(err, os.ErrExist) {
+					continue
+				}
+				return err
+			}
+		})
+		switch {
+		case errors.Is(err, errSkipped):
+			continue
+		case errors.Is(err, context.Canceled):
+			return nil
+		case err != nil:
+			return err
+		}
+		r.remember(KindTrash, target, "")
+		r.advance(target, 1, 0)
 	}
 	return nil
 }
@@ -145,6 +231,12 @@ func RestorePath(trashDir, stored string) (string, bool) {
 		return "", false
 	}
 	topDir := trashTopDir(trashDir)
+	if nativeTrash() && (filepath.Base(trashDir) == ".Trash" || (filepath.Base(trashDir) == strconv.Itoa(os.Getuid()) && filepath.Base(filepath.Dir(trashDir)) == ".Trashes")) {
+		if !filepath.IsAbs(stored) {
+			return "", false
+		}
+		return filepath.Clean(stored), true
+	}
 	if filepath.IsAbs(stored) {
 		target := filepath.Clean(stored)
 		return target, trashDir == homeTrash() || isUnder(target, topDir)
@@ -189,6 +281,10 @@ func resolvesInside(target, topDir string) bool {
 }
 
 func forgetTrashed(path string) {
+	if nativeTrash() {
+		_ = forgetTrash(path)
+		return
+	}
 	filesDir := filepath.Dir(path)
 	trashDir := filepath.Dir(filesDir)
 	if filepath.Base(filesDir) != "files" || !isTrashDir(trashDir) {
@@ -223,14 +319,23 @@ func (r *runner) emptyTrash() error {
 		if r.job.closed() {
 			return nil
 		}
-		if err := r.retry(entry.FilesPath, func(fs FS) error { return fs.RemoveAll(entry.FilesPath) }); err != nil {
+		var err error
+		switch {
+		case nativeTrash():
+			err = r.retryLocal(entry.FilesPath, func() error { return removeTrash(entry) })
+		default:
+			err = r.retry(entry.FilesPath, func(fs FS) error { return fs.RemoveAll(entry.FilesPath) })
+		}
+		if err != nil {
 			if errors.Is(err, errSkipped) {
 				continue
 			}
 			return skipToNil(err)
 		}
-		os.Remove(entry.InfoPath)
-		dirs[entry.TrashDir] = true
+		if !nativeTrash() {
+			os.Remove(entry.InfoPath)
+			dirs[entry.TrashDir] = true
+		}
 		r.advance(entry.FilesPath, 1, entry.Size)
 	}
 
@@ -245,6 +350,9 @@ func directorySizesPath(trashDir string) string {
 }
 
 func writeDirectorySize(entry trash.Entry, size int64) {
+	if nativeTrash() {
+		return
+	}
 	info, err := os.Lstat(entry.InfoPath)
 	if err != nil {
 		return
