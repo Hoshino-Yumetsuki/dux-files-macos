@@ -1,0 +1,151 @@
+name: macOS Build
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: Sign and notarize using configured secrets
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      sign:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+  QT_VERSION: "6.10.0"
+  QT_LICENSE: opensource
+  MACOSX_DEPLOYMENT_TARGET: "13.0"
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
+jobs:
+  build:
+    name: Static macOS arm64
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - name: Configure build paths
+        id: toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          xcrun xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+          {
+            echo "QT_SOURCE_DIR=$RUNNER_TEMP/qt-source-$QT_VERSION"
+            echo "QT_ARCHIVE_DIR=$RUNNER_TEMP/qt-archives-$QT_VERSION"
+            echo "QT_BUILD_DIR=$RUNNER_TEMP/qt-build-$QT_VERSION"
+            echo "QT_STATIC_PREFIX=$RUNNER_TEMP/qt-static-$QT_VERSION"
+            echo "BUILD_DIR=$GITHUB_WORKSPACE/build/macos-static"
+            echo "DIST_DIR=$GITHUB_WORKSPACE/dist/macos-arm64"
+          } >> "$GITHUB_ENV"
+          echo "xcode=$(xcrun xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "qt_paths=$(printf '%s\n' "$RUNNER_TEMP/qt-source-$QT_VERSION" "$RUNNER_TEMP/qt-build-$QT_VERSION" "$RUNNER_TEMP/qt-static-$QT_VERSION" | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Download and verify Qt sources
+        run: sh macos/scripts/fetch-qt.sh
+
+      - name: Cache static Qt
+        id: qt-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.QT_STATIC_PREFIX }}
+          key: macos-15-${{ runner.arch }}-qt-${{ env.QT_VERSION }}-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ steps.toolchain.outputs.xcode }}-${{ steps.toolchain.outputs.qt_paths }}-${{ hashFiles('macos/scripts/build-static-qt.sh', 'macos/scripts/fetch-qt.sh', 'macos/patches/*') }}
+
+      - name: Build static Qt
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        run: sh macos/scripts/build-static-qt.sh
+
+      - name: Configure signing credentials
+        if: inputs.sign == true
+        shell: bash
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          API_KEY: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
+          API_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          API_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          set -euo pipefail
+          for value in CERTIFICATE CERTIFICATE_PASSWORD SIGNING_IDENTITY API_KEY API_KEY_ID API_ISSUER; do
+            [[ -n "${!value}" ]] || { echo "Missing required signing secret: $value" >&2; exit 1; }
+          done
+          umask 077
+          printf '%s' "$CERTIFICATE" | base64 -D > "$RUNNER_TEMP/signing.p12"
+          printf '%s' "$API_KEY" | base64 -D > "$RUNNER_TEMP/notary.p8"
+          password=$(openssl rand -hex 32)
+          echo "::add-mask::$password"
+          security create-keychain -p "$password" "$RUNNER_TEMP/signing.keychain-db"
+          security unlock-keychain -p "$password" "$RUNNER_TEMP/signing.keychain-db"
+          security import "$RUNNER_TEMP/signing.p12" -k "$RUNNER_TEMP/signing.keychain-db" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$RUNNER_TEMP/signing.keychain-db" >/dev/null
+          rm -f "$RUNNER_TEMP/signing.p12"
+          {
+            echo "SIGNING_KEYCHAIN=$RUNNER_TEMP/signing.keychain-db"
+            echo "NOTARY_KEY=$RUNNER_TEMP/notary.p8"
+          } >> "$GITHUB_ENV"
+
+      - name: Build app
+        env:
+          SIGNING_IDENTITY: ${{ inputs.sign && secrets.MACOS_SIGNING_IDENTITY || '' }}
+          NOTARY_KEY_ID: ${{ inputs.sign && secrets.MACOS_NOTARY_KEY_ID || '' }}
+          NOTARY_ISSUER: ${{ inputs.sign && secrets.MACOS_NOTARY_ISSUER || '' }}
+        run: sh macos/scripts/package.sh
+
+      - name: Remove signing credentials
+        if: always() && inputs.sign == true
+        shell: bash
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/signing.p12" "$RUNNER_TEMP/notary.p8"
+
+      - name: Archive app and relink materials
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$QT_ARCHIVE_DIR"/*.tar.xz "$DIST_DIR/relink/"
+          cp "$QT_STATIC_PREFIX/dux-static-build.txt" "$DIST_DIR/relink/"
+          cp macos/scripts/fetch-qt.sh "$DIST_DIR/relink/"
+          xcrun xcodebuild -version > "$DIST_DIR/relink/TOOLCHAIN.txt"
+          xcrun --sdk macosx --show-sdk-version >> "$DIST_DIR/relink/TOOLCHAIN.txt"
+          xcrun clang++ --version >> "$DIST_DIR/relink/TOOLCHAIN.txt"
+          mkdir -p artifacts
+          tar -czf artifacts/dfiles-macos-arm64.tar.gz -C "$DIST_DIR" .
+          (cd artifacts && shasum -a 256 dfiles-macos-arm64.tar.gz > dfiles-macos-arm64.tar.gz.sha256)
+          if [[ "${{ inputs.sign }}" == 'true' ]]; then
+            cp "$DIST_DIR/Dux Files.zip" artifacts/dfiles-macos-arm64.zip
+            (cd artifacts && shasum -a 256 dfiles-macos-arm64.zip > dfiles-macos-arm64.zip.sha256)
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dfiles-macos-arm64
+          path: artifacts/dfiles-macos-arm64.*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

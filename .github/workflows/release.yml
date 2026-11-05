@@ -3,7 +3,7 @@ name: Create Release
 on:
   push:
     tags:
-      - "v*"
+      - "**"
 
 concurrency:
   group: release-${{ github.ref_name }}
@@ -13,6 +13,15 @@ env:
   CGO_ENABLED: "0"
 
 jobs:
+  macos:
+    name: Build macOS App
+    uses: ./.github/workflows/macos-build.yml
+    with:
+      sign: ${{ vars.MACOS_SIGN_RELEASE == 'true' }}
+    secrets: inherit
+    permissions:
+      contents: read
+
   test:
     name: Run Tests
     runs-on: ubuntu-24.04
@@ -122,7 +131,7 @@ jobs:
   create_release:
     name: Create GitHub Release
     runs-on: ubuntu-24.04
-    needs: [build, package_completions]
+    needs: [build, package_completions, macos]
     permissions:
       contents: write
     steps:

@@ -9,6 +9,23 @@ Built with [Quickshell](https://quickshell.org/) and [Go](https://go.dev/)
 
 </div>
 
+## macOS fork
+
+This fork adds a native macOS host while retaining the Dux QML interface. Start
+with the [macOS build and packaging guide](macos/README.md); the Linux instructions
+below describe the upstream application.
+
+Every branch push builds an arm64 app in
+[GitHub Actions](https://github.com/Hoshino-Yumetsuki/dux-files-macos/actions/workflows/macos-build.yml).
+Download `dfiles-macos-arm64` from a successful run: it contains the app archive,
+SHA-256 checksum and Qt relink materials. These development builds are unsigned
+and not notarized unless signing is explicitly configured; macOS may block them.
+
+```sh
+git clone --branch macos-port --recurse-submodules https://github.com/Hoshino-Yumetsuki/dux-files-macos.git
+cd dux-files-macos
+```
+
 Dux Files is a standalone file manager for Wayland. A small Go daemon does the file work and a Quickshell UI sits on top of it. It looks and feels like the rest of the dux desktop and picks up Dux Shell's colors when DMS is running, but it works fine on its own.
 
 ## Features
